@@ -12,7 +12,7 @@ account=os.getenv('R2_ACCOUNT_ID')
 key=os.getenv('R2_ACCESS_KEY_ID')
 secret=os.getenv('R2_SECRET_ACCESS_KEY')
 s3=boto3.client('s3',endpoint_url=f'https://{account}.r2.cloudflarestorage.com',region_name='auto',aws_access_key_id=key,aws_secret_access_key=secret,config=Config(signature_version='s3v4')) if all((account,key,secret)) else None
-PAT=re.compile(r'^nationwide/(luzon|visayas|mindanao)/([a-z0-9-]{2,60})/(npaaad|safdz)\\.gpkg$')
+PAT=re.compile(r'^nationwide/(luzon|visayas|mindanao)/([a-z0-9-]{2,60})/(npaaad|safdz)[.]gpkg$')
 @app.get('/health')
 def health():return jsonify(ok=True,storageConfigured=bool(s3))
 @app.get('/api/inventory')
