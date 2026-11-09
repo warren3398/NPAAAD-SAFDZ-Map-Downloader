@@ -26,22 +26,22 @@ def inventory():
     if m and obj.get('Size',0)>0:rows.append(dict(island=m[1],province=m[2],layer=m[3],size=obj['Size']))
   return jsonify(items=sorted(rows,key=lambda x:(x['island'],x['province'],x['layer'])))
  except Exception:return jsonify(error='R2 inventory unavailable'),503
-def load():
+def load(preview=False):
  island=request.args.get('island','');province=request.args.get('province','');layer=request.args.get('layer','')
  path=f'nationwide/{island}/{province}/{layer}.gpkg'
  if not PAT.fullmatch(path):raise ValueError('Invalid dataset')
  if not s3:raise RuntimeError('R2 not configured')
  with tempfile.TemporaryDirectory() as tmp:
-  file=Path(tmp)/'data.gpkg';s3.download_file(BUCKET,path,str(file));gdf=gpd.read_file(file)
+  file=Path(tmp)/'data.gpkg';s3.download_file(BUCKET,path,str(file));gdf=gpd.read_file(file, rows=800) if preview else gpd.read_file(file)
  if gdf.crs is None or gdf.empty:raise ValueError('Empty data or missing CRS')
  gdf=gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].copy()
  return gdf,province,layer
 @app.get('/api/preview')
 def preview():
  try:
-  gdf,_,_=load()
-  if len(gdf)>30000:gdf=gdf.iloc[:30000].copy()
-  return jsonify(json.loads(gdf.to_crs(4326).to_json()))
+  gdf,_,_=load(preview=True)
+  gdf=gdf.to_crs(4326)\n  gdf['geometry']=gdf.geometry.simplify(0.001, preserve_topology=True)\n  gdf=gdf[['geometry']]
+  return jsonify(json.loads(gdf.to_json()))
  except ValueError as e:return jsonify(error=str(e)),400
  except Exception:return jsonify(error='Preview unavailable'),503
 @app.get('/api/download')
