@@ -40,7 +40,9 @@ def load(preview=False):
 def preview():
  try:
   gdf,_,_=load(preview=True)
-  gdf=gdf.to_crs(4326)\n  gdf['geometry']=gdf.geometry.simplify(0.001, preserve_topology=True)\n  gdf=gdf[['geometry']]
+  gdf=gdf.to_crs(4326)
+  gdf['geometry']=gdf.geometry.simplify(0.001, preserve_topology=True)
+  gdf=gdf[['geometry']]
   return jsonify(json.loads(gdf.to_json()))
  except ValueError as e:return jsonify(error=str(e)),400
  except Exception:return jsonify(error='Preview unavailable'),503
