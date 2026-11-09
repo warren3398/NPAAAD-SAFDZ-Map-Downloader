@@ -1,0 +1,1 @@
+Start nationwide NPAAAD SAFDZ resumable export queue. Run in bounded batches every two hours; checkpoint stored in Cloudflare R2.
