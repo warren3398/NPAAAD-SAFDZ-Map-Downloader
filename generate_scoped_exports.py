@@ -13,6 +13,7 @@ p.add_argument('--layer',required=True,choices=['npaaad','safdz'])
 p.add_argument('--offset',type=int,default=0)
 p.add_argument('--limit',type=int,default=20)
 p.add_argument('--scope',choices=['municipality','barangay','both'],default='both')
+p.add_argument('--place-filter',default='',help='Process only this exact scoped place slug')
 a=p.parse_args()
 if a.offset<0 or not 1<=a.limit<=100:p.error('Invalid offset or limit')
 account=os.environ['R2_ACCOUNT_ID']
@@ -63,6 +64,9 @@ with tempfile.TemporaryDirectory() as temp:
    unique[key]=(*old[:4],unary_union([old[4],task[4]]))
   else:unique[key]=task
  tasks=list(unique.values())
+ if a.place_filter:
+  tasks=[task for task in tasks if task[1]==a.place_filter]
+  if not tasks:raise SystemExit('Requested administrative location not found: '+a.place_filter)
  print(f'PLAN {a.island}/{province}/{a.layer}: {len(tasks)} administrative locations; offset={a.offset} limit={a.limit}',flush=True)
  completed=0;skipped=0;empty=0
  for level,place,mun,brgy,geom in tasks[a.offset:a.offset+a.limit]:
