@@ -157,10 +157,11 @@ def locations():
  level='barangay' if municipality else 'municipality'
  try:
   frame,columns=boundary_table(level)
-  name_col=admin_col(columns,['ADM4_EN','ADM3_EN' if municipality else 'ADM2_EN','barangay','barangay_name','brgy_name','BRGY_NAME','name','NAME_4' if municipality else 'NAME_2','MUN_NAME','MUNICIPALITY','CITY_MUN','municipality_name','NAME'])
-  prov_col=admin_col(columns,['ADM2_EN' if municipality else 'ADM1_EN','province','province_name','PROV_NAME','NAME_1','adm2_name','PROVINCE','prov'])
-  mun_col=admin_col(columns,['ADM3_EN','municipality','municipality_name','city_mun','MUN_NAME','CITY_NAME','NAME_2','adm3_name','municity'])
-  if not name_col:return jsonify(error='Boundary file has no recognized location name column'),503
+  # These field names were verified against the actual R2 GeoPackage schemas.
+  name_col=admin_col(columns,['NAME_3','VARNAME_3'] if municipality else ['NAME_2','VARNAME_2'])
+  prov_col=admin_col(columns,['NAME_1'])
+  mun_col=admin_col(columns,['NAME_2']) if municipality else None
+  if not name_col or not prov_col:return jsonify(error='Required NAME fields missing from boundary GeoPackage'),503
   def norm(value):return re.sub(r'[^a-z0-9]','',str(value).lower())
   if prov_col:
    target=norm(province.replace('-',' '))
