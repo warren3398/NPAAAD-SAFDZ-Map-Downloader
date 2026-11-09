@@ -76,25 +76,61 @@ def download():
       if chunk:yield chunk
     finally:obj['Body'].close()
    return Response(stream_with_context(chunks()),headers={'Content-Disposition':f'attachment; filename="{province}_{layer}.gpkg"','Content-Length':str(obj['ContentLength'])},mimetype='application/geopackage+sqlite3')
-  gdf,province,layer=load();name=f'{province}_{layer}'
-  if fmt=='zip':
-   with tempfile.TemporaryDirectory() as tmp:
-    base=Path(tmp)/f'{name}.shp';gdf.to_file(base,driver='ESRI Shapefile',encoding='UTF-8')
-    out=io.BytesIO()
-    with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
-     for f in Path(tmp).glob(name+'.*'):z.write(f,f.name)
-    out.seek(0)
-   return send_file(out,mimetype='application/zip',as_attachment=True,download_name=name+'.zip')
-  projected=gdf.to_crs(3857)
-  fig,ax=plt.subplots(figsize=(11.7,8.3))
-  projected.plot(ax=ax,color='#77b49a',edgecolor='#333333',linewidth=.15)
-  try:
-   import contextily as ctx
-   ctx.add_basemap(ax,source=ctx.providers.Esri.WorldImagery,attribution=False)
-  except Exception:pass
-  ax.set_axis_off();ax.set_title(f'{layer.upper()} — {province.replace("-"," ").title()}')
-  out=io.BytesIO();fig.savefig(out,format='jpeg' if fmt=='jpeg' else 'pdf',dpi=180,bbox_inches='tight');plt.close(fig);out.seek(0)
-  return send_file(out,mimetype='image/jpeg' if fmt=='jpeg' else 'application/pdf',as_attachment=True,download_name=name+('.jpg' if fmt=='jpeg' else '.pdf'))
+  island=request.args.get('island','');province=request.args.get('province','');layer=request.args.get('layer','')
+  key=f'nationwide/{island}/{province}/{layer}.gpkg'
+  if not PAT.fullmatch(key):return jsonify(error='Invalid dataset'),400
+  if not s3:return jsonify(error='Storage unavailable'),503
+  name=f'{province}_{layer}'
+  if fmt in ('jpeg','pdf'):
+   from PIL import Image,ImageDraw
+   import pyogrio
+   with CACHE_LOCK:
+    file=Path(tempfile.gettempdir())/('npaaad_cache_'+island+'_'+province+'_'+layer+'.gpkg')
+    if not file.exists() or file.stat().st_size==0:
+     staging=file.with_suffix('.part')
+     try:
+      s3.download_file(BUCKET,key,str(staging));staging.replace(file)
+     finally:
+      if staging.exists():staging.unlink()
+   info=pyogrio.read_info(str(file))
+   bounds=info.get('total_bounds')
+   if bounds is None:raise ValueError('Dataset has no extent')
+   xmin,ymin,xmax,ymax=map(float,bounds)
+   if xmax<=xmin or ymax<=ymin:raise ValueError('Invalid dataset extent')
+   width,height=1700,1700
+   margin=65
+   scale=min((width-2*margin)/(xmax-xmin),(height-2*margin)/(ymax-ymin))
+   image=Image.new('RGB',(width,height),'white')
+   draw=ImageDraw.Draw(image)
+   def coords(ring):
+    return [((x-xmin)*scale+margin,height-margin-(y-ymin)*scale) for x,y in ring]
+   def paint(geom):
+    if geom is None or geom.is_empty:return
+    if geom.geom_type=='Polygon':
+     draw.polygon(coords(geom.exterior.coords),fill='#76b69b')
+     for interior in geom.interiors:draw.polygon(coords(interior.coords),fill='white')
+    elif geom.geom_type in ('MultiPolygon','GeometryCollection'):
+     for part in geom.geoms:paint(part)
+   offset=0
+   while True:
+    frame=pyogrio.read_dataframe(str(file),skip_features=offset,max_features=200,columns=[])
+    if frame.empty:break
+    for geom in frame.geometry:paint(geom)
+    offset+=len(frame)
+    if len(frame)<200:break
+   out=io.BytesIO()
+   if fmt=='jpeg':image.save(out,format='JPEG',quality=90,optimize=True)
+   else:image.save(out,format='PDF',resolution=150)
+   out.seek(0)
+   return send_file(out,mimetype='image/jpeg' if fmt=='jpeg' else 'application/pdf',as_attachment=True,download_name=name+('.jpg' if fmt=='jpeg' else '.pdf'))
+  gdf,province,layer=load()
+  with tempfile.TemporaryDirectory() as tmp:
+   base=Path(tmp)/f'{name}.shp';gdf.to_file(base,driver='ESRI Shapefile',encoding='UTF-8')
+   out=io.BytesIO()
+   with zipfile.ZipFile(out,'w',zipfile.ZIP_DEFLATED) as z:
+    for f in Path(tmp).glob(name+'.*'):z.write(f,f.name)
+   out.seek(0)
+  return send_file(out,mimetype='application/zip',as_attachment=True,download_name=name+'.zip')
  except ValueError as e:return jsonify(error=str(e)),400
  except Exception:return jsonify(error='Export failed'),503
 @app.get('/')
