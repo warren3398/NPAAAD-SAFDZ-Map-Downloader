@@ -14,24 +14,38 @@ select{width:100%;padding:12px;border:1px solid #b9cdc0;border-radius:9px;backgr
 .note{font-size:13px;color:#647a6d;margin:18px 0 0;line-height:1.5}
 @media(max-width:620px){.fields{grid-template-columns:1fr}.panel{padding:17px}.actions{flex-direction:column}button{width:100%}}
 </style></head>
-<body><header><h1>NPAAAD–SAFDZ Map Downloader</h1><p>Select a province and download available GIS datasets.</p></header>
+<body><header><h1>NPAAAD–SAFDZ Map Downloader</h1><p>Select a province, municipality or barangay and download available GIS datasets.</p></header>
 <main><section class="panel"><div class="fields">
 <div><label for="island">Island group</label><select id="island"><option value="">Loading islands…</option></select></div>
 <div><label for="province">Province</label><select id="province" disabled><option value="">Select island first</option></select></div>
+<div><label for="municipality">Municipality / City (optional)</label><select id="municipality" disabled><option value="">Whole province</option></select></div>
+<div><label for="barangay">Barangay (optional)</label><select id="barangay" disabled><option value="">All barangays</option></select></div>
 <div><label for="layer">Layer</label><select id="layer"><option value="npaaad">NPAAAD</option><option value="safdz">SAFDZ</option></select></div>
 </div><div id="status" class="status" role="status" aria-live="polite">Checking available datasets…</div>
 <div class="actions"><button data-fmt="gpkg" disabled>Download Original GeoPackage</button><button data-fmt="jpeg" disabled>Download JPEG</button><button data-fmt="pdf" disabled>Download PDF</button><button data-fmt="zip" disabled>Download Shapefile ZIP</button></div>
-<p class="note">No map preview is loaded. Original GeoPackage downloads preserve the source data. Shapefile ZIP, JPEG and PDF are available only after pre-generation and upload to storage. The selected dataset is checked using the storage inventory. “Ready to Download” means the source file is listed in storage; export processing starts when you click a download button.</p>
+<p class="note">No map preview is loaded. Original provincial GeoPackage downloads preserve the source data. Municipality and barangay options appear only when clipped exports have been uploaded. Shapefile ZIP, JPEG and PDF are available only after pre-generation and upload to storage. The selected dataset is checked using the storage inventory. “Ready to Download” means the source file is listed in storage; export processing starts when you click a download button.</p>
 </section></main>
 <script>
-const $=id=>document.getElementById(id),buttons=[...document.querySelectorAll('[data-fmt]')];let items=[];
+const $=id=>document.getElementById(id),buttons=[...document.querySelectorAll('[data-fmt]')];let items=[],scoped=[];
 function status(message,kind=''){const el=$('status');el.textContent=message;el.className='status '+kind}
 function pretty(s){return s.split('-').map(v=>v.charAt(0).toUpperCase()+v.slice(1)).join(' ')}
 function fill(el,values,placeholder){el.replaceChildren(new Option(placeholder,''),...values.map(v=>new Option(pretty(v),v)))}
+function level(){return $('barangay').value?'barangay':$('municipality').value?'municipality':'province'}
+function place(){return level()==='barangay'?$('barangay').value:$('municipality').value}
 function selected(){return items.find(x=>x.island===$('island').value&&x.province===$('province').value&&x.layer===$('layer').value)}
-function update(){const found=selected();buttons.forEach(b=>{b.disabled=!found||!found.formats.includes(b.dataset.fmt);b.title=found&&!found.formats.includes(b.dataset.fmt)?'Not yet pre-generated in storage':''});if(!$('island').value)status('Select an island group to continue.');else if(!$('province').value)status('Select a province to continue.');else if(found)status('✓ Ready to Download — '+pretty(found.province)+' / '+found.layer.toUpperCase()+'. Available: '+found.formats.map(x=>x.toUpperCase()).join(', ')+'. Other formats are pending pre-generation.','ready');else status('The selected layer is not available in storage.','error')}
-$('island').addEventListener('change',()=>{const provinces=[...new Set(items.filter(x=>x.island===$('island').value).map(x=>x.province))].sort();fill($('province'),provinces,'Select province');$('province').disabled=!$('island').value;update()});
-$('province').addEventListener('change',update);$('layer').addEventListener('change',update);
-fetch('/api/inventory',{cache:'no-store'}).then(async r=>{const d=await r.json();if(!r.ok||d.error)throw Error(d.error||'Inventory unavailable');return d}).then(d=>{items=d.items||[];fill($('island'),[...new Set(items.map(x=>x.island))].sort(),'Select island');update()}).catch(e=>{fill($('island'),[],'Unavailable');status('Could not load dataset list: '+e.message,'error')});
-buttons.forEach(b=>b.addEventListener('click',()=>{const f=selected();if(!f)return;const p=new URLSearchParams({island:f.island,province:f.province,layer:f.layer,format:b.dataset.fmt});status('Preparing '+b.dataset.fmt.toUpperCase()+' export. This may take time for large files…');window.location.assign('/api/download?'+p)}));
+function update(){const found=selected(),scope=level(),available=scope==='province'?(found?.formats||[]):scoped.filter(x=>found&&x.island===found.island&&x.province===found.province&&x.layer===found.layer&&x.scope===scope&&x.place===place()).map(x=>x.format);buttons.forEach(b=>{b.disabled=!found||!available.includes(b.dataset.fmt);b.title=!available.includes(b.dataset.fmt)?'No pre-generated clipped file in storage':''});if(!$('island').value)status('Select an island group to continue.');else if(!$('province').value)status('Select a province to continue.');else if(found&&available.length)status('✓ Ready to Download — '+pretty(place()||found.province)+' / '+found.layer.toUpperCase()+'. Available: '+available.map(x=>x.toUpperCase()).join(', ')+'.','ready');else if(found&&scope!=='province')status('Clipped '+scope+' files are not yet generated for this location. Choose Whole province to download available provincial files.');else status('The selected layer is not available in storage.','error')}
+$('island').addEventListener('change',()=>{const provinces=[...new Set(items.filter(x=>x.island===$('island').value).map(x=>x.province))].sort();fill($('province'),provinces,'Select province');$('province').disabled=!$('island').value;refreshPlaces()});
+function refreshPlaces(){
+ const island=$('island').value,province=$('province').value;
+ const municipalities=[...new Set(scoped.filter(x=>x.island===island&&x.province===province&&x.scope==='municipality').map(x=>x.place))].sort();
+ fill($('municipality'),municipalities,'Whole province');$('municipality').disabled=!province||!municipalities.length;
+ const barangays=[...new Set(scoped.filter(x=>x.island===island&&x.province===province&&x.scope==='barangay').map(x=>x.place))].sort();
+ fill($('barangay'),barangays,'All barangays');$('barangay').disabled=!province||!barangays.length;
+ update();
+}
+$('municipality').addEventListener('change',()=>{$('barangay').value='';update()});
+$('barangay').addEventListener('change',()=>{if($('barangay').value)$('municipality').value='';update()});
+$('province').addEventListener('change',refreshPlaces);$('layer').addEventListener('change',update);
+fetch('/api/inventory',{cache:'no-store'}).then(async r=>{const d=await r.json();if(!r.ok||d.error)throw Error(d.error||'Inventory unavailable');return d}).then(d=>{items=d.items||[];scoped=d.scoped||[];fill($('island'),[...new Set(items.map(x=>x.island))].sort(),'Select island');update()}).catch(e=>{fill($('island'),[],'Unavailable');status('Could not load dataset list: '+e.message,'error')});
+buttons.forEach(b=>b.addEventListener('click',()=>{const f=selected();if(!f)return;const p=new URLSearchParams({island:f.island,province:f.province,layer:f.layer,format:b.dataset.fmt,scope:level(),place:place()});status('Preparing '+b.dataset.fmt.toUpperCase()+' export. This may take time for large files…');window.location.assign('/api/download?'+p)}));
 </script></body></html>
