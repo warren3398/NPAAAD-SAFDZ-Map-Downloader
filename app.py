@@ -60,8 +60,22 @@ def preview():
 @app.get('/api/download')
 def download():
  fmt=request.args.get('format','')
- if fmt not in ('zip','pdf','jpeg'):return jsonify(error='Invalid format'),400
+ if fmt not in ('gpkg','zip','pdf','jpeg'):return jsonify(error='Invalid format'),400
  try:
+  if fmt=='gpkg':
+   island=request.args.get('island','');province=request.args.get('province','');layer=request.args.get('layer','')
+   key=f'nationwide/{island}/{province}/{layer}.gpkg'
+   if not PAT.fullmatch(key):return jsonify(error='Invalid dataset'),400
+   if not s3:return jsonify(error='Storage unavailable'),503
+   from botocore.exceptions import ClientError
+   from flask import Response,stream_with_context
+   obj=s3.get_object(Bucket=BUCKET,Key=key)
+   def chunks():
+    try:
+     for chunk in obj['Body'].iter_chunks(chunk_size=1024*1024):
+      if chunk:yield chunk
+    finally:obj['Body'].close()
+   return Response(stream_with_context(chunks()),headers={'Content-Disposition':f'attachment; filename="{province}_{layer}.gpkg"','Content-Length':str(obj['ContentLength'])},mimetype='application/geopackage+sqlite3')
   gdf,province,layer=load();name=f'{province}_{layer}'
   if fmt=='zip':
    with tempfile.TemporaryDirectory() as tmp:
