@@ -16,6 +16,10 @@ on:
         required: true
         type: choice
         options: [npaaad, safdz]
+      dem_key:
+        description: R2 DEM GeoTIFF object key for hillshade (optional)
+        required: false
+        type: string
       class_field:
         description: Classification column (optional; auto-detect if blank)
         required: false
@@ -51,12 +55,14 @@ jobs:
           ISLAND: ${{ inputs.island }}
           PROVINCE: ${{ inputs.province }}
           LAYER: ${{ inputs.layer }}
+          DEM_KEY: ${{ inputs.dem_key }}
           CLASS_FIELD: ${{ inputs.class_field }}
           SKIP_SHAPEFILE: ${{ inputs.skip_shapefile }}
         run: |
           python - <<'PY'
           import os,subprocess,sys
           args=[sys.executable,"generate_exports.py","--island",os.environ["ISLAND"],"--province",os.environ["PROVINCE"],"--layer",os.environ["LAYER"]]
+          if os.environ.get("DEM_KEY"):args+=["--dem-key",os.environ["DEM_KEY"]]
           if os.environ.get("CLASS_FIELD"):args+=["--class-field",os.environ["CLASS_FIELD"]]
           if os.environ.get("SKIP_SHAPEFILE")=="true":args+=["--skip-shapefile"]
           subprocess.run(args,check=True)
