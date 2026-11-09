@@ -1,6 +1,7 @@
 """Offline cartographic layout matching the Slope Map two-panel design."""
 from datetime import date
 import textwrap
+import numpy as np
 import geopandas as gpd
 import matplotlib
 matplotlib.use("Agg")
@@ -22,7 +23,7 @@ def find_field(frame,layer):
  for key in (layer.upper(),"MAP_SYMBOL","MAPPING_SYMBOL","CLASS","CLASSIFICATION","SYMBOL","CODE","LAND_CLASS","TYPE"):
   if key in lookup:return lookup[key]
  raise ValueError("No classification column identified. Specify --class-field to avoid incorrect legend.")
-def render_map(gpkg,layer,province,jpeg_path,pdf_path,class_field=None):
+def render_map(gpkg,layer,province,jpeg_path,pdf_path,class_field=None,dem_path=None):
  layer=layer.lower()
  frame=gpd.read_file(gpkg)
  if frame.empty or frame.crs is None:raise ValueError("Missing geometries or CRS")
@@ -41,9 +42,31 @@ def render_map(gpkg,layer,province,jpeg_path,pdf_path,class_field=None):
  gs=GridSpec(1,2,figure=fig,width_ratios=[2.55,1],wspace=.035,left=.02,right=.98,top=.965,bottom=.035)
  ax=fig.add_subplot(gs[0,0]);side=fig.add_subplot(gs[0,1]);side.set_xlim(0,1);side.set_ylim(0,1);side.axis("off")
  ax.set_facecolor("#eaf0f2")
+ if dem_path:
+  import rasterio
+  from rasterio.enums import Resampling
+  from rasterio.warp import reproject, transform_bounds
+  from rasterio.transform import from_bounds
+  from matplotlib.colors import LightSource
+  with rasterio.open(dem_path) as ds:
+   bounds=transform_bounds(ds.crs,mapframe.crs,*ds.bounds)
+   width=1200
+   height=max(1,round(width*(bounds[3]-bounds[1])/max(bounds[2]-bounds[0],1)))
+   height=min(height,1600)
+   transform=from_bounds(*bounds,width,height)
+   elev=np.full((height,width),np.nan,dtype="float32")
+   reproject(rasterio.band(ds,1),elev,src_transform=ds.transform,src_crs=ds.crs,src_nodata=ds.nodata,dst_transform=transform,dst_crs=mapframe.crs,dst_nodata=np.nan,resampling=Resampling.bilinear)
+   valid=np.isfinite(elev)
+   if valid.any():
+    fill=np.where(valid,elev,np.nanmedian(elev[valid]))
+    shade=LightSource(azdeg=315,altdeg=45).hillshade(fill,dx=abs(transform.a),dy=abs(transform.e))
+    ax.imshow(shade,cmap="gray",extent=bounds,origin="upper",alpha=.65,zorder=0)
+
  for code,description,rgb in STYLES[layer]:
   sub=mapframe.loc[frame["_class"]==code]
-  if not sub.empty:sub.plot(ax=ax,color=tuple(v/255 for v in rgb),edgecolor="none",linewidth=0)
+  if not sub.empty:sub.plot(ax=ax,color=tuple(v/255 for v in rgb),alpha=.70 if dem_path else 1,edgecolor="none",linewidth=0,zorder=2)
+ boundary=mapframe.geometry.union_all()
+ gpd.GeoSeries([boundary],crs=mapframe.crs).boundary.plot(ax=ax,color="#203d32",linewidth=1.3,zorder=5)
  ax.set_aspect("equal");ax.set_xticks([]);ax.set_yticks([])
  ax.annotate("N",xy=(.96,.88),xytext=(.96,.95),xycoords="axes fraction",textcoords="axes fraction",ha="center",fontsize=17,fontweight="bold",arrowprops=dict(arrowstyle="-|>",color="#17402d"))
  for spine in ax.spines.values():spine.set_color("#17402d")
@@ -74,9 +97,9 @@ def render_map(gpkg,layer,province,jpeg_path,pdf_path,class_field=None):
  side.text(.97,y,"100.00" if total else "0.00",ha="right",fontsize=8.5,weight="bold",transform=side.transAxes)
  heading(.116,"Map Information")
  side.text(.04,.055,"Source: NPAAAD / SAFDZ GeoPackage",fontsize=8,transform=side.transAxes)
- side.text(.04,.035,"CRS: "+str(mapframe.crs),fontsize=8,transform=side.transAxes)
+ side.text(.04,.035,"CRS: "+str(mapframe.crs.to_epsg() or mapframe.crs.name)[:45],fontsize=8,transform=side.transAxes)
  side.text(.04,.015,"Generated: "+date.today().isoformat(),fontsize=8,transform=side.transAxes)
  fig.savefig(jpeg_path,dpi=170,facecolor="white",pil_kwargs={"quality":92})
  fig.savefig(pdf_path,facecolor="white")
  plt.close(fig)
- return {"feature_count":len(frame),"total_ha":total,"class_field":field}
+ return {"feature_count":len(frame),"total_ha":total,"class_field":field,"hillshade":bool(dem_path),"boundary":True}
