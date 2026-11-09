@@ -106,5 +106,37 @@ def download():
   finally:obj['Body'].close()
  mime={'gpkg':'application/geopackage+sqlite3','zip':'application/zip','jpeg':'image/jpeg','pdf':'application/pdf'}[fmt]
  return Response(stream_with_context(chunks()),headers={'Content-Disposition':f'attachment; filename="{province}_{layer}.{ext}"','Content-Length':str(obj['ContentLength'])},mimetype=mime)
+
+# Philippine Standard Geographic Code (PSGC) names for location selection.
+# This service is separate from the R2 export inventory.
+from functools import lru_cache
+from urllib.request import urlopen
+from urllib.parse import quote
+@lru_cache(maxsize=512)
+def psgc(path):
+ import json as _json
+ with urlopen('https://psgc.gitlab.io/api/'+path,timeout=12) as response:
+  return _json.load(response)
+@app.get('/api/locations')
+def locations():
+ province=request.args.get('province','').strip()
+ municipality=request.args.get('municipality','').strip()
+ if not re.fullmatch(r'[a-z0-9-]{2,90}',province):
+  return jsonify(error='Select a province'),400
+ try:
+  provinces=psgc('provinces/')
+  def normalize(value):return re.sub(r'[^a-z0-9]','',value.lower())
+  found=next((x for x in provinces if normalize(x.get('name',''))==normalize(province.replace('-',' '))),None)
+  if not found:return jsonify(error='Province not found in PSGC'),404
+  cities=psgc('provinces/'+quote(found['code'])+'/cities-municipalities/')
+  if municipality:
+   city=next((x for x in cities if x.get('code')==municipality),None)
+   if not city:return jsonify(error='Municipality not found'),404
+   return jsonify(items=[{'code':x['code'],'name':x['name']} for x in psgc('cities-municipalities/'+quote(city['code'])+'/barangays/')])
+  return jsonify(items=[{'code':x['code'],'name':x['name']} for x in cities])
+ except Exception:
+  app.logger.exception('PSGC lookup failed')
+  return jsonify(error='Administrative location service temporarily unavailable'),503
+
 @app.get('/')
 def home():return render_template('index.html')
