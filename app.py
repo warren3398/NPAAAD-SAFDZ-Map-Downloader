@@ -107,36 +107,74 @@ def download():
  mime={'gpkg':'application/geopackage+sqlite3','zip':'application/zip','jpeg':'image/jpeg','pdf':'application/pdf'}[fmt]
  return Response(stream_with_context(chunks()),headers={'Content-Disposition':f'attachment; filename="{province}_{layer}.{ext}"','Content-Length':str(obj['ContentLength'])},mimetype=mime)
 
-# Philippine Standard Geographic Code (PSGC) names for location selection.
-# This service is separate from the R2 export inventory.
+# Administrative names are read from the existing Slope Map R2 GeoPackages.
+# Keep boundary credentials separate from the export bucket credentials.
 from functools import lru_cache
-from urllib.request import urlopen
-from urllib.parse import quote
-@lru_cache(maxsize=512)
-def psgc(path):
- import json as _json
- with urlopen('https://psgc.gitlab.io/api/'+path,timeout=12) as response:
-  return _json.load(response)
+import pyogrio
+BOUNDARY_BUCKET=os.getenv('BOUNDARY_R2_BUCKET','slopemap-gis-data')
+boundary_key=os.getenv('BOUNDARY_R2_ACCESS_KEY_ID')
+boundary_secret=os.getenv('BOUNDARY_R2_SECRET_ACCESS_KEY')
+boundary_account=os.getenv('BOUNDARY_R2_ACCOUNT_ID') or account
+boundary_s3=boto3.client('s3',endpoint_url=f'https://{boundary_account}.r2.cloudflarestorage.com',region_name='auto',aws_access_key_id=boundary_key,aws_secret_access_key=boundary_secret,config=Config(signature_version='s3v4')) if all((boundary_account,boundary_key,boundary_secret)) else None
+BOUNDARY_NAMES={'municipality':'municipalities.gpkg','barangay':'barangays.gpkg'}
+def boundary_path(level):
+ if not boundary_s3:raise RuntimeError('Boundary R2 credentials are not configured')
+ path=Path(tempfile.gettempdir())/('npaaad_admin_'+BOUNDARY_NAMES[level])
+ if path.exists() and path.stat().st_size>0:return path
+ with CACHE_LOCK:
+  if path.exists() and path.stat().st_size>0:return path
+  tmp=path.with_suffix('.part')
+  try:
+   boundary_s3.download_file(BOUNDARY_BUCKET,'boundaries/'+BOUNDARY_NAMES[level],str(tmp))
+   tmp.replace(path)
+  finally:
+   if tmp.exists():tmp.unlink()
+ return path
+def admin_col(cols,options):
+ lower={x.lower():x for x in cols}
+ return next((lower[n.lower()] for n in options if n.lower() in lower),None)
+@lru_cache(maxsize=2)
+def boundary_table(level):
+ path=boundary_path(level)
+ info=pyogrio.read_info(str(path))
+ columns=list(info['fields'])
+ # Read only attributes: avoid loading thousands of heavy polygon geometries.
+ frame=pyogrio.read_dataframe(str(path),columns=columns,read_geometry=False)
+ return frame,columns
+@app.get('/api/boundary-info')
+def boundary_info():
+ if not boundary_s3:return jsonify(configured=False),503
+ try:
+  return jsonify(configured=True,layers={level:{'columns':boundary_table(level)[1],'rows':len(boundary_table(level)[0])} for level in BOUNDARY_NAMES})
+ except Exception:
+  app.logger.exception('Boundary info failed')
+  return jsonify(error='Unable to read boundary files'),503
 @app.get('/api/locations')
 def locations():
  province=request.args.get('province','').strip()
  municipality=request.args.get('municipality','').strip()
- if not re.fullmatch(r'[a-z0-9-]{2,90}',province):
-  return jsonify(error='Select a province'),400
+ if not re.fullmatch(r'[a-z0-9-]{2,90}',province):return jsonify(error='Select a province'),400
+ level='barangay' if municipality else 'municipality'
  try:
-  provinces=psgc('provinces/')
-  def normalize(value):return re.sub(r'[^a-z0-9]','',value.lower())
-  found=next((x for x in provinces if normalize(x.get('name',''))==normalize(province.replace('-',' '))),None)
-  if not found:return jsonify(error='Province not found in PSGC'),404
-  cities=psgc('provinces/'+quote(found['code'])+'/cities-municipalities/')
+  frame,columns=boundary_table(level)
+  name_col=admin_col(columns,['ADM4_EN','ADM3_EN' if municipality else 'ADM2_EN','barangay','barangay_name','brgy_name','BRGY_NAME','name','NAME_4' if municipality else 'NAME_2','MUN_NAME','MUNICIPALITY','CITY_MUN','municipality_name','NAME'])
+  prov_col=admin_col(columns,['ADM2_EN' if municipality else 'ADM1_EN','province','province_name','PROV_NAME','NAME_1','adm2_name','PROVINCE','prov'])
+  mun_col=admin_col(columns,['ADM3_EN','municipality','municipality_name','city_mun','MUN_NAME','CITY_NAME','NAME_2','adm3_name','municity'])
+  if not name_col:return jsonify(error='Boundary file has no recognized location name column'),503
+  def norm(value):return re.sub(r'[^a-z0-9]','',str(value).lower())
+  if prov_col:
+   target=norm(province.replace('-',' '))
+   frame=frame[frame[prov_col].map(norm)==target]
+  else:
+   return jsonify(error='Province field not detected in boundary GeoPackage'),503
   if municipality:
-   city=next((x for x in cities if x.get('code')==municipality),None)
-   if not city:return jsonify(error='Municipality not found'),404
-   return jsonify(items=[{'code':x['code'],'name':x['name']} for x in psgc('cities-municipalities/'+quote(city['code'])+'/barangays/')])
-  return jsonify(items=[{'code':x['code'],'name':x['name']} for x in cities])
+   if not mun_col:return jsonify(error='Municipality field not detected in barangay GeoPackage'),503
+   frame=frame[frame[mun_col].map(norm)==norm(municipality)]
+  names=sorted(set(str(x).strip() for x in frame[name_col].dropna() if str(x).strip()),key=str.casefold)
+  return jsonify(items=[{'code':name,'name':name} for name in names])
  except Exception:
-  app.logger.exception('PSGC lookup failed')
-  return jsonify(error='Administrative location service temporarily unavailable'),503
+  app.logger.exception('Boundary location lookup failed')
+  return jsonify(error='Boundary lookup unavailable; check R2 permissions and boundary columns'),503
 
 @app.get('/')
 def home():return render_template('index.html')
