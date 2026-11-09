@@ -32,7 +32,7 @@ def load(preview=False):
  if not PAT.fullmatch(path):raise ValueError('Invalid dataset')
  if not s3:raise RuntimeError('R2 not configured')
  with tempfile.TemporaryDirectory() as tmp:
-  file=Path(tmp)/'data.gpkg';s3.download_file(BUCKET,path,str(file));gdf=gpd.read_file(file, rows=800) if preview else gpd.read_file(file)
+  file=Path(tmp)/'data.gpkg';s3.download_file(BUCKET,path,str(file));gdf=gpd.read_file(file, skip_features=max(0,int(request.args.get('offset','0'))), max_features=500) if preview else gpd.read_file(file)
  if gdf.crs is None or gdf.empty:raise ValueError('Empty data or missing CRS')
  gdf=gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].copy()
  return gdf,province,layer
@@ -43,7 +43,7 @@ def preview():
   gdf=gdf.to_crs(4326)
   gdf['geometry']=gdf.geometry.simplify(0.001, preserve_topology=True)
   gdf=gdf[['geometry']]
-  return jsonify(json.loads(gdf.to_json()))
+  return jsonify(features=json.loads(gdf.to_json())['features'], count=len(gdf), nextOffset=int(request.args.get('offset','0'))+len(gdf))
  except ValueError as e:return jsonify(error=str(e)),400
  except Exception:return jsonify(error='Preview unavailable'),503
 @app.get('/api/download')
