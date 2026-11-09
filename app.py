@@ -171,4 +171,13 @@ def download():
  mime={'gpkg':'application/geopackage+sqlite3','zip':'application/zip','jpeg':'image/jpeg','pdf':'application/pdf'}[fmt]
  return Response(stream_with_context(chunks()),headers={'Content-Disposition':f'attachment; filename="{province}_{layer}.{ext}"','Content-Length':str(obj['ContentLength'])},mimetype=mime)
 @app.get('/')
-def home():return render_template('index.html')
+def home():return render_template('index.html')   # Discover only pre-generated municipality and barangay files.
+   scoped=[]
+   scoped_pattern=re.compile(r'exports/(luzon|visayas|mindanao)/([a-z0-9-]{2,60})/(municipality|barangay)/([a-z0-9-]{2,90})/(npaaad|safdz)[.](gpkg|jpg|pdf|zip)$')
+   for page in s3.get_paginator('list_objects_v2').paginate(Bucket=BUCKET,Prefix='exports/'):
+    for obj in page.get('Contents',[]):
+     m=scoped_pattern.fullmatch(obj['Key'])
+     if m and obj.get('Size',0)>0:
+      scoped.append(dict(island=m[1],province=m[2],scope=m[3],place=m[4],layer=m[5],format={'jpg':'jpeg'}.get(m[6],m[6])))
+   return jsonify(items=sorted(datasets.values(),key=lambda x:(x['island'],x['province'],x['layer'])),scoped=scoped)
+
