@@ -1,0 +1,67 @@
+name: Generate municipal and barangay GIS exports
+on:
+  workflow_dispatch:
+    inputs:
+      island:
+        description: Island group
+        required: true
+        type: choice
+        options: [luzon, visayas, mindanao]
+      province:
+        description: Province slug (e.g. abra, albay)
+        required: true
+        type: string
+      layer:
+        description: Dataset
+        required: true
+        type: choice
+        options: [npaaad, safdz]
+      scope:
+        description: Geographic level
+        required: true
+        type: choice
+        options: [both, municipality, barangay]
+      offset:
+        description: Resume at location number (0, 20, 40...)
+        required: true
+        default: '0'
+        type: string
+      limit:
+        description: Maximum locations in this run (1-100)
+        required: true
+        default: '20'
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: scoped-${{ inputs.island }}-${{ inputs.province }}-${{ inputs.layer }}
+  cancel-in-progress: false
+jobs:
+  scoped:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install GIS dependencies
+        run: pip install -r requirements.txt
+      - name: Generate and upload clipped exports
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          BOUNDARY_R2_ACCESS_KEY_ID: ${{ secrets.BOUNDARY_R2_ACCESS_KEY_ID }}
+          BOUNDARY_R2_SECRET_ACCESS_KEY: ${{ secrets.BOUNDARY_R2_SECRET_ACCESS_KEY }}
+          BOUNDARY_R2_BUCKET: slopemap-gis-data
+          ISLAND: ${{ inputs.island }}
+          PROVINCE: ${{ inputs.province }}
+          LAYER: ${{ inputs.layer }}
+          SCOPE: ${{ inputs.scope }}
+          OFFSET: ${{ inputs.offset }}
+          LIMIT: ${{ inputs.limit }}
+        run: |
+          python generate_scoped_exports.py --island "$ISLAND" --province "$PROVINCE" --layer "$LAYER" --scope "$SCOPE" --offset "$OFFSET" --limit "$LIMIT"
