@@ -9,6 +9,7 @@ from botocore.config import Config
 from map_layout import render_map
 p=argparse.ArgumentParser()
 for name in ("island","province","layer"):p.add_argument("--"+name,required=True)
+p.add_argument("--dem-key",help="Existing Cloudflare R2 object key of DEM GeoTIFF for hillshade")
 p.add_argument("--class-field",help="Explicit source attribute containing classification codes")
 p.add_argument("--skip-shapefile",action="store_true")
 a=p.parse_args()
@@ -21,7 +22,11 @@ with tempfile.TemporaryDirectory() as directory:
  root=Path(directory);source=root/"source.gpkg"
  s3.download_file(bucket,f"nationwide/{prefix}.gpkg",str(source))
  jpg=root/"map.jpg";pdf=root/"map.pdf"
- result=render_map(source,a.layer,a.province,jpg,pdf,class_field=a.class_field)
+ dem=None
+ if a.dem_key:
+  dem=root/"hillshade_dem.tif"
+  s3.download_file(bucket,a.dem_key,str(dem))
+ result=render_map(source,a.layer,a.province,jpg,pdf,class_field=a.class_field,dem_path=dem)
  print("Validated map:",result,flush=True)
  files={"jpg":jpg,"pdf":pdf}
  if not a.skip_shapefile:
