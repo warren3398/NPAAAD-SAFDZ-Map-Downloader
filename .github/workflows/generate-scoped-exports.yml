@@ -1,5 +1,8 @@
 name: Generate municipal and barangay GIS exports
 on:
+  push:
+    paths:
+      - '.github/scoped-export-test-trigger.txt'
   workflow_dispatch:
     inputs:
       island:
@@ -34,7 +37,7 @@ on:
 permissions:
   contents: read
 concurrency:
-  group: scoped-${{ inputs.island }}-${{ inputs.province }}-${{ inputs.layer }}
+  group: scoped-${{ inputs.island || 'luzon' }}-${{ inputs.province || 'abra' }}-${{ inputs.layer || 'npaaad' }}
   cancel-in-progress: false
 jobs:
   scoped:
@@ -57,11 +60,11 @@ jobs:
           BOUNDARY_R2_ACCESS_KEY_ID: ${{ secrets.BOUNDARY_R2_ACCESS_KEY_ID }}
           BOUNDARY_R2_SECRET_ACCESS_KEY: ${{ secrets.BOUNDARY_R2_SECRET_ACCESS_KEY }}
           BOUNDARY_R2_BUCKET: slopemap-gis-data
-          ISLAND: ${{ inputs.island }}
-          PROVINCE: ${{ inputs.province }}
-          LAYER: ${{ inputs.layer }}
-          SCOPE: ${{ inputs.scope }}
-          OFFSET: ${{ inputs.offset }}
-          LIMIT: ${{ inputs.limit }}
+          ISLAND: ${{ inputs.island || 'luzon' }}
+          PROVINCE: ${{ inputs.province || 'abra' }}
+          LAYER: ${{ inputs.layer || 'npaaad' }}
+          SCOPE: ${{ inputs.scope || 'both' }}
+          OFFSET: ${{ inputs.offset || '0' }}
+          LIMIT: ${{ inputs.limit || '1' }}
         run: |
           python generate_scoped_exports.py --island "$ISLAND" --province "$PROVINCE" --layer "$LAYER" --scope "$SCOPE" --offset "$OFFSET" --limit "$LIMIT"
