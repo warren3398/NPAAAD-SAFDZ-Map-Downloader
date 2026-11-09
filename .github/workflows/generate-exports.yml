@@ -1,0 +1,63 @@
+name: Generate provincial GIS exports
+on:
+  workflow_dispatch:
+    inputs:
+      island:
+        description: Island group
+        required: true
+        type: choice
+        options: [luzon, visayas, mindanao]
+      province:
+        description: Province slug (e.g. abra)
+        required: true
+        type: string
+      layer:
+        description: GIS layer
+        required: true
+        type: choice
+        options: [npaaad, safdz]
+      class_field:
+        description: Classification column (optional; auto-detect if blank)
+        required: false
+        type: string
+      skip_shapefile:
+        description: Generate only JPEG/PDF
+        required: false
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: gis-export-${{ inputs.island }}-${{ inputs.province }}-${{ inputs.layer }}
+  cancel-in-progress: false
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install GIS dependencies
+        run: pip install -r requirements.txt
+      - name: Generate and upload provincial exports
+        env:
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_BUCKET: ${{ vars.R2_BUCKET }}
+          ISLAND: ${{ inputs.island }}
+          PROVINCE: ${{ inputs.province }}
+          LAYER: ${{ inputs.layer }}
+          CLASS_FIELD: ${{ inputs.class_field }}
+          SKIP_SHAPEFILE: ${{ inputs.skip_shapefile }}
+        run: |
+          python - <<'PY'
+          import os,subprocess,sys
+          args=[sys.executable,"generate_exports.py","--island",os.environ["ISLAND"],"--province",os.environ["PROVINCE"],"--layer",os.environ["LAYER"]]
+          if os.environ.get("CLASS_FIELD"):args+=["--class-field",os.environ["CLASS_FIELD"]]
+          if os.environ.get("SKIP_SHAPEFILE")=="true":args+=["--skip-shapefile"]
+          subprocess.run(args,check=True)
+          PY
