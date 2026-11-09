@@ -1,0 +1,1 @@
+Abra NPAAAD scoped GIS export smoke test: one location. Triggered after boundary R2 GitHub secrets were configured.
