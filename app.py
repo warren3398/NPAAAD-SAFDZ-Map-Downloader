@@ -1,4 +1,4 @@
-import os,io,re,tempfile,zipfile,json,threading,time
+import os,io,re,tempfile,zipfile,json,threading,time,uuid,datetime
 from pathlib import Path
 from flask import Flask,request,jsonify,send_file,render_template
 import boto3,geopandas as gpd
@@ -200,3 +200,55 @@ def nationwide_progress():
  except Exception:
   app.logger.exception('Nationwide progress unavailable')
   return jsonify(error='Unable to load nationwide checkpoint'),503
+
+@app.post('/api/request-export')
+def request_export():
+ if not s3:return jsonify(error='Storage unavailable'),503
+ data=request.get_json(silent=True) or {}
+ island=str(data.get('island',''));province=str(data.get('province',''));layer=str(data.get('layer',''));scope=str(data.get('scope',''));place=str(data.get('place',''))
+ if island not in ('luzon','visayas','mindanao') or not re.fullmatch(r'[a-z0-9-]{2,60}',province) or layer not in ('npaaad','safdz') or scope not in ('municipality','barangay') or not re.fullmatch(r'[a-z0-9-]{2,90}',place):
+  return jsonify(error='Invalid export request'),400
+ prefix=f'exports/{island}/{province}/{scope}/{place}/{layer}'
+ keys=[prefix+'.jpg',prefix+'.pdf',prefix+'.zip']
+ try:
+  found=[]
+  for key_name in keys:
+   try:s3.head_object(Bucket=BUCKET,Key=key_name);found.append(True)
+   except Exception as exc:
+    code=getattr(exc,'response',{}).get('Error',{}).get('Code','')
+    if code in ('404','NoSuchKey','NotFound'):found.append(False)
+    else:raise
+  if all(found):return jsonify(status='ready',message='Exports already exist',formats=['jpeg','pdf','zip'])
+  if any(found):return jsonify(error='Partial export exists; administrator review required'),409
+  # Stable request key prevents repeated clicks from creating a storm of jobs.
+  import hashlib
+  identity='|'.join([island,province,scope,place,layer])
+  request_id=hashlib.sha256(identity.encode()).hexdigest()[:32]
+  key_name='requests/'+request_id+'.json'
+  try:
+   existing=s3.get_object(Bucket=BUCKET,Key=key_name)
+   state=json.loads(existing['Body'].read())
+   if state.get('status') in ('queued','processing'):
+    return jsonify(request_id=request_id,status=state['status'],message='This export is already in the queue')
+  except Exception as exc:
+   code=getattr(exc,'response',{}).get('Error',{}).get('Code','')
+   if code not in ('404','NoSuchKey','NotFound'):raise
+  state={'request_id':request_id,'island':island,'province':province,'layer':layer,'scope':scope,'place':place,'status':'queued','created_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+  s3.put_object(Bucket=BUCKET,Key=key_name,Body=json.dumps(state).encode(),ContentType='application/json')
+  return jsonify(request_id=request_id,status='queued',message='Request queued. GitHub Actions will pick it up on its next scheduled run.'),202
+ except Exception:
+  app.logger.exception('Could not queue export')
+  return jsonify(error='Unable to queue export right now'),503
+
+@app.get('/api/request-export/<request_id>')
+def request_export_status(request_id):
+ if not re.fullmatch(r'[a-f0-9]{32}',request_id):return jsonify(error='Invalid request ID'),400
+ if not s3:return jsonify(error='Storage unavailable'),503
+ try:
+  obj=s3.get_object(Bucket=BUCKET,Key='requests/'+request_id+'.json')
+  return jsonify(json.loads(obj['Body'].read()))
+ except Exception as exc:
+  code=getattr(exc,'response',{}).get('Error',{}).get('Code','')
+  if code in ('404','NoSuchKey','NotFound'):return jsonify(error='Request not found'),404
+  app.logger.exception('Request status lookup failed')
+  return jsonify(error='Request status unavailable'),503
