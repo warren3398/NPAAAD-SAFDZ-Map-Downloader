@@ -1,4 +1,4 @@
-import os,io,re,tempfile,zipfile,json
+import os,io,re,tempfile,zipfile,json,threading,time
 from pathlib import Path
 from flask import Flask,request,jsonify,send_file,render_template
 import boto3,geopandas as gpd
@@ -12,6 +12,7 @@ account=os.getenv('R2_ACCOUNT_ID')
 key=os.getenv('R2_ACCESS_KEY_ID')
 secret=os.getenv('R2_SECRET_ACCESS_KEY')
 s3=boto3.client('s3',endpoint_url=f'https://{account}.r2.cloudflarestorage.com',region_name='auto',aws_access_key_id=key,aws_secret_access_key=secret,config=Config(signature_version='s3v4')) if all((account,key,secret)) else None
+CACHE_LOCK=threading.Lock()
 PAT=re.compile(r'^nationwide/(luzon|visayas|mindanao)/([a-z0-9-]{2,60})/(npaaad|safdz)[.]gpkg$')
 @app.get('/health')
 def health():return jsonify(ok=True,storageConfigured=bool(s3))
@@ -31,8 +32,16 @@ def load(preview=False):
  path=f'nationwide/{island}/{province}/{layer}.gpkg'
  if not PAT.fullmatch(path):raise ValueError('Invalid dataset')
  if not s3:raise RuntimeError('R2 not configured')
- with tempfile.TemporaryDirectory() as tmp:
-  file=Path(tmp)/'data.gpkg';s3.download_file(BUCKET,path,str(file));gdf=gpd.read_file(file, skip_features=max(0,int(request.args.get('offset','0'))), max_features=500) if preview else gpd.read_file(file)
+ with CACHE_LOCK:
+  file=Path(tempfile.gettempdir())/('npaaad_cache_'+island+'_'+province+'_'+layer+'.gpkg')
+  if not file.exists() or file.stat().st_size==0:
+   staging=file.with_suffix('.part')
+   try:
+    s3.download_file(BUCKET,path,str(staging))
+    staging.replace(file)
+   finally:
+    if staging.exists():staging.unlink()
+ gdf=gpd.read_file(file, skip_features=max(0,int(request.args.get('offset','0'))), max_features=200) if preview else gpd.read_file(file)
  if gdf.crs is None or gdf.empty:raise ValueError('Empty data or missing CRS')
  gdf=gdf[gdf.geometry.notna() & ~gdf.geometry.is_empty].copy()
  return gdf,province,layer
@@ -45,7 +54,9 @@ def preview():
   gdf=gdf[['geometry']]
   return jsonify(features=json.loads(gdf.to_json())['features'], count=len(gdf), nextOffset=int(request.args.get('offset','0'))+len(gdf))
  except ValueError as e:return jsonify(error=str(e)),400
- except Exception:return jsonify(error='Preview unavailable'),503
+ except Exception as e:
+  app.logger.exception('Preview failure')
+  return jsonify(error='Preview unavailable: '+type(e).__name__),503
 @app.get('/api/download')
 def download():
  fmt=request.args.get('format','')
