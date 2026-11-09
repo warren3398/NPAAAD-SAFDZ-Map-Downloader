@@ -14,7 +14,7 @@ p.add_argument("--skip-shapefile",action="store_true")
 a=p.parse_args()
 if a.island not in ("luzon","visayas","mindanao") or a.layer not in ("npaaad","safdz") or not a.province.replace("-","").isalnum():p.error("Invalid dataset")
 account=os.environ["R2_ACCOUNT_ID"]
-bucket=os.getenv("R2_BUCKET","npaaad-safdz-data")
+bucket=os.getenv("R2_BUCKET") or "npaaad-safdz-data"
 s3=boto3.client("s3",endpoint_url=f"https://{account}.r2.cloudflarestorage.com",region_name="auto",aws_access_key_id=os.environ["R2_ACCESS_KEY_ID"],aws_secret_access_key=os.environ["R2_SECRET_ACCESS_KEY"],config=Config(signature_version="s3v4"))
 prefix=f"{a.island}/{a.province}/{a.layer}"
 with tempfile.TemporaryDirectory() as directory:
