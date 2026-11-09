@@ -31,9 +31,8 @@ def inventory():
     m=re.fullmatch(r'exports/(luzon|visayas|mindanao)/([a-z0-9-]{2,60})/(npaaad|safdz)[.](jpg|pdf|zip)',obj['Key'])
     if m and obj.get('Size',0)>0 and (m[1],m[2],m[3]) in datasets:
      datasets[(m[1],m[2],m[3])]['formats'].append({'jpg':'jpeg','pdf':'pdf','zip':'zip'}[m[4]])
-  # Scoped exports must exist in R2 before appearing as downloadable choices.
   scoped=[]
-  scoped_pattern=re.compile(r'exports/(luzon|visayas|mindanao)/([a-z0-9-]{2,60})/(municipality|barangay)/([a-z0-9-]{2,90})/(npaaad|safdz)[.](gpkg|jpg|pdf|zip)
+  pattern=re.compile(r'exports/(luzon|visayas|mindanao)/([a-z0-9-]{2,60})/(municipality|barangay)/([a-z0-9-]{2,90})/(npaaad|safdz)[.](gpkg|jpg|pdf|zip)
  except Exception:
   app.logger.exception('Inventory failed')
   return jsonify(error='R2 inventory unavailable'),503
@@ -80,7 +79,7 @@ def download():
  place=request.args.get('place','')
  if scope not in ('province','municipality','barangay'):return jsonify(error='Invalid administrative level'),400
  if scope!='province':
-  if not re.fullmatch(r'[a-z0-9-]{2,90}',place):return jsonify(error='Invalid municipality or barangay'),400
+  if not re.fullmatch(r'[a-z0-9-]{2,90}',place):return jsonify(error='Invalid location'),400
   object_key=f'exports/{island}/{province}/{scope}/{place}/{layer}.{ext}'
  else:
   object_key=source if fmt=='gpkg' else f'exports/{island}/{province}/{layer}.{ext}'
@@ -100,13 +99,13 @@ def download():
     if chunk:yield chunk
   finally:obj['Body'].close()
  mime={'gpkg':'application/geopackage+sqlite3','zip':'application/zip','jpeg':'image/jpeg','pdf':'application/pdf'}[fmt]
- return Response(stream_with_context(chunks()),headers={'Content-Disposition':f'attachment; filename="{place if scope!="province" else province}_{layer}.{ext}"','Content-Length':str(obj['ContentLength'])},mimetype=mime)
+ return Response(stream_with_context(chunks()),headers={'Content-Disposition':f'attachment; filename="{province}_{layer}.{ext}"','Content-Length':str(obj['ContentLength'])},mimetype=mime)
 @app.get('/')
 def home():return render_template('index.html')
 )
   for page in s3.get_paginator('list_objects_v2').paginate(Bucket=BUCKET,Prefix='exports/'):
    for obj in page.get('Contents',[]):
-    m=scoped_pattern.fullmatch(obj['Key'])
+    m=pattern.fullmatch(obj['Key'])
     if m and obj.get('Size',0)>0:
      scoped.append(dict(island=m[1],province=m[2],scope=m[3],place=m[4],layer=m[5],format={'jpg':'jpeg'}.get(m[6],m[6])))
   return jsonify(items=sorted(datasets.values(),key=lambda x:(x['island'],x['province'],x['layer'])),scoped=scoped)
@@ -171,13 +170,4 @@ def download():
  mime={'gpkg':'application/geopackage+sqlite3','zip':'application/zip','jpeg':'image/jpeg','pdf':'application/pdf'}[fmt]
  return Response(stream_with_context(chunks()),headers={'Content-Disposition':f'attachment; filename="{province}_{layer}.{ext}"','Content-Length':str(obj['ContentLength'])},mimetype=mime)
 @app.get('/')
-def home():return render_template('index.html')  # Discover only pre-generated municipality and barangay files.
-  scoped=[]
-  scoped_pattern=re.compile(r'exports/(luzon|visayas|mindanao)/([a-z0-9-]{2,60})/(municipality|barangay)/([a-z0-9-]{2,90})/(npaaad|safdz)[.](gpkg|jpg|pdf|zip)$')
-  for page in s3.get_paginator('list_objects_v2').paginate(Bucket=BUCKET,Prefix='exports/'):
-   for obj in page.get('Contents',[]):
-    m=scoped_pattern.fullmatch(obj['Key'])
-    if m and obj.get('Size',0)>0:
-     scoped.append(dict(island=m[1],province=m[2],scope=m[3],place=m[4],layer=m[5],format={'jpg':'jpeg'}.get(m[6],m[6])))
-  return jsonify(items=sorted(datasets.values(),key=lambda x:(x['island'],x['province'],x['layer'])),scoped=scoped)
-
+def home():return render_template('index.html')
