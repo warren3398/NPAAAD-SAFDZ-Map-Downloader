@@ -179,3 +179,24 @@ def locations():
 
 @app.get('/')
 def home():return render_template('index.html')
+
+@app.get('/api/nationwide-progress')
+def nationwide_progress():
+ if not s3:return jsonify(error='R2 not configured'),503
+ try:
+  from botocore.exceptions import ClientError
+  try:
+   obj=s3.get_object(Bucket=BUCKET,Key='automation/nationwide-scoped-progress-v1.json')
+  except ClientError as exc:
+   if exc.response.get('Error',{}).get('Code') in ('NoSuchKey','404','NotFound'):
+    return jsonify(status='not_started',message='Nationwide checkpoint not yet created')
+   raise
+  state=json.loads(obj['Body'].read())
+  total=int(state.get('total_source_datasets',0))
+  done=len(state.get('completed_datasets',[]))
+  index=int(state.get('dataset',0))
+  failed=state.get('failures',{})
+  return jsonify(status='complete' if total and index>=total else 'attention' if failed else 'processing',total=total,completed=done,current_dataset_index=index+1 if index<total else total,stage=state.get('stage'),offset=state.get('offset',0),failures=failed,updated_utc=state.get('updated_utc'),completed_datasets=state.get('completed_datasets',[]))
+ except Exception:
+  app.logger.exception('Nationwide progress unavailable')
+  return jsonify(error='Unable to load nationwide checkpoint'),503
