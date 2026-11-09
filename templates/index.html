@@ -20,8 +20,8 @@ select{width:100%;padding:12px;border:1px solid #b9cdc0;border-radius:9px;backgr
 <div><label for="province">Province</label><select id="province" disabled><option value="">Select island first</option></select></div>
 <div><label for="layer">Layer</label><select id="layer"><option value="npaaad">NPAAAD</option><option value="safdz">SAFDZ</option></select></div>
 </div><div id="status" class="status" role="status" aria-live="polite">Checking available datasets…</div>
-<div class="actions"><button data-fmt="jpeg" disabled>Download JPEG</button><button data-fmt="pdf" disabled>Download PDF</button><button data-fmt="zip" disabled>Download Shapefile ZIP</button></div>
-<p class="note">No map preview is loaded. The selected dataset is checked using the storage inventory. “Ready to Download” means the source file is listed in storage; export processing starts when you click a download button.</p>
+<div class="actions"><button data-fmt="gpkg" disabled>Download Original GeoPackage</button><button data-fmt="jpeg" disabled>Download JPEG</button><button data-fmt="pdf" disabled>Download PDF</button><button data-fmt="zip" disabled>Download Shapefile ZIP</button></div>
+<p class="note">No map preview is loaded. Original GeoPackage downloads preserve the source data. Shapefile ZIP is converted from the complete source. The selected dataset is checked using the storage inventory. “Ready to Download” means the source file is listed in storage; export processing starts when you click a download button.</p>
 </section></main>
 <script>
 const $=id=>document.getElementById(id),buttons=[...document.querySelectorAll('[data-fmt]')];let items=[];
