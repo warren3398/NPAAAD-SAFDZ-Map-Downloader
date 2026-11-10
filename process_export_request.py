@@ -32,6 +32,10 @@ try:
  result=subprocess.run(cmd,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=3300)
  print(result.stdout,flush=True)
  if result.returncode:raise RuntimeError('Generator exit code '+str(result.returncode))
+ prefix='exports/{}/{}/{}/{}/{}'.format(item['island'],item['province'],item['scope'],item['place'],item['layer'])
+ for ext in ('jpg','pdf','zip'):
+  try:s3.head_object(Bucket=bucket,Key=prefix+'.'+ext)
+  except Exception as e:raise RuntimeError('Expected output missing: '+ext+'; '+str(e))
  item['status']='ready';item['completed_at']=datetime.now(timezone.utc).isoformat();item['formats']=['jpeg','pdf','zip']
  write(item_key,item)
  print('REQUEST_READY',item['request_id'],flush=True)
