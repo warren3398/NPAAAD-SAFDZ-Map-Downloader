@@ -235,7 +235,19 @@ def request_export():
    if code not in ('404','NoSuchKey','NotFound'):raise
   state={'request_id':request_id,'island':island,'province':province,'layer':layer,'scope':scope,'place':place,'status':'queued','created_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
   s3.put_object(Bucket=BUCKET,Key=key_name,Body=json.dumps(state).encode(),ContentType='application/json')
-  return jsonify(request_id=request_id,status='queued',message='Request queued. GitHub Actions will pick it up on its next scheduled run.'),202
+  # Dispatch the GitHub worker immediately when an Actions-scoped token is configured.
+  # Keep the scheduled worker as a safe fallback if dispatch is unavailable.
+  dispatched=False
+  token=os.getenv('GITHUB_ACTIONS_TOKEN','').strip()
+  if token:
+   try:
+    import urllib.request
+    payload=json.dumps({'ref':'main'}).encode()
+    req=urllib.request.Request('https://api.github.com/repos/warren3398/NPAAAD-SAFDZ-Map-Downloader/actions/workflows/free-on-demand-exports.yml/dispatches',data=payload,headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'npaaad-map-generator','Content-Type':'application/json'},method='POST')
+    with urllib.request.urlopen(req,timeout=12) as response:dispatched=response.status==204
+   except Exception:
+    app.logger.exception('Immediate GitHub workflow dispatch failed; scheduled queue remains active')
+  return jsonify(request_id=request_id,status='queued',dispatched=dispatched,message=('Generation workflow triggered immediately.' if dispatched else 'Queued for the scheduled GitHub Actions worker; immediate dispatch requires GITHUB_ACTIONS_TOKEN.')),202
  except Exception:
   app.logger.exception('Could not queue export')
   return jsonify(error='Unable to queue export right now'),503
