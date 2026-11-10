@@ -260,8 +260,12 @@ def request_export():
    with urllib.request.urlopen(req,timeout=12) as response:dispatched=response.status==204
    dispatch_message='GitHub Actions workflow triggered. Waiting for GIS worker.' if dispatched else 'GitHub Actions did not accept the workflow dispatch.'
   except urllib.error.HTTPError as exc:
-   dispatch_message='GitHub Actions dispatch rejected (HTTP '+str(exc.code)+'). Check token repository access and Actions: Read and write permission.'
-   app.logger.warning('GitHub dispatch rejected: HTTP %s',exc.code)
+   try:
+    gh_error=json.loads(exc.read(4096).decode('utf-8','replace'))
+    gh_message=str(gh_error.get('message',''))[:240]
+   except Exception:gh_message=''
+   dispatch_message='GitHub Actions dispatch rejected (HTTP '+str(exc.code)+')'+(': '+gh_message if gh_message else '. Check GitHub repository Actions settings and token access.')
+   app.logger.warning('GitHub dispatch rejected: HTTP %s; reason=%s',exc.code,gh_message)
   except Exception:
    dispatch_message='Could not reach GitHub Actions. Scheduled processing remains available.'
    app.logger.exception('Immediate GitHub workflow dispatch failed')
