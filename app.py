@@ -206,9 +206,9 @@ def request_export():
  if not s3:return jsonify(error='Storage unavailable'),503
  data=request.get_json(silent=True) or {}
  island=str(data.get('island',''));province=str(data.get('province',''));layer=str(data.get('layer',''));scope=str(data.get('scope',''));place=str(data.get('place',''))
- if island not in ('luzon','visayas','mindanao') or not re.fullmatch(r'[a-z0-9-]{2,60}',province) or layer not in ('npaaad','safdz') or scope not in ('municipality','barangay') or not re.fullmatch(r'[a-z0-9-]{2,90}',place):
+ if island not in ('luzon','visayas','mindanao') or not re.fullmatch(r'[a-z0-9-]{2,60}',province) or layer not in ('npaaad','safdz') or scope not in ('province','municipality','barangay') or (scope!='province' and not re.fullmatch(r'[a-z0-9-]{2,90}',place)):
   return jsonify(error='Invalid export request'),400
- prefix=f'exports/{island}/{province}/{scope}/{place}/{layer}'
+ prefix=(f'exports/{island}/{province}/{layer}' if scope=='province' else f'exports/{island}/{province}/{scope}/{place}/{layer}')
  keys=[prefix+'.jpg',prefix+'.pdf',prefix+'.zip']
  try:
   found=[]
