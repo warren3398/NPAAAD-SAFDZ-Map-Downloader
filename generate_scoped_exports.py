@@ -12,7 +12,7 @@ p.add_argument('--province',required=True)
 p.add_argument('--layer',required=True,choices=['npaaad','safdz'])
 p.add_argument('--offset',type=int,default=0)
 p.add_argument('--limit',type=int,default=20)
-p.add_argument('--scope',choices=['municipality','barangay','both'],default='both')
+p.add_argument('--scope',choices=['province','municipality','barangay','both'],default='both')
 p.add_argument('--place-filter',default='',help='Process only this exact scoped place slug')
 a=p.parse_args()
 if a.offset<0 or not 1<=a.limit<=100:p.error('Invalid offset or limit')
@@ -37,7 +37,10 @@ with tempfile.TemporaryDirectory() as temp:
  source_frame=gpd.read_file(source)
  if source_frame.crs is None:raise ValueError('Source CRS missing')
  source_frame=source_frame[source_frame.geometry.notna() & ~source_frame.geometry.is_empty].copy()
- levels=['municipality','barangay'] if a.scope=='both' else [a.scope]
+ levels=['municipality','barangay'] if a.scope=='both' else ([] if a.scope=='province' else [a.scope])
+ if a.scope=='province':
+  from shapely.ops import unary_union
+  tasks=[('province','',province,'',unary_union(source_frame.geometry))]
  tasks=[]
  for level in levels:
   name='municipalities.gpkg' if level=='municipality' else 'barangays.gpkg'
@@ -70,14 +73,14 @@ with tempfile.TemporaryDirectory() as temp:
  print(f'PLAN {a.island}/{province}/{a.layer}: {len(tasks)} administrative locations; offset={a.offset} limit={a.limit}',flush=True)
  completed=0;skipped=0;empty=0
  for level,place,mun,brgy,geom in tasks[a.offset:a.offset+a.limit]:
-  prefix=f'exports/{a.island}/{province}/{level}/{place}/{a.layer}'
+  prefix=(f'exports/{a.island}/{province}/{a.layer}' if level=='province' else f'exports/{a.island}/{province}/{level}/{place}/{a.layer}')
   keys={ext:f'{prefix}.{ext}' for ext in ('jpg','pdf','zip')}
   if all(exists(key) for key in keys.values()):
    skipped+=1;print('SKIP existing',prefix,flush=True);continue
   try:
-   subset=source_frame.loc[source_frame.geometry.intersects(geom)].copy()
+   subset=(source_frame.copy() if level=='province' else source_frame.loc[source_frame.geometry.intersects(geom)].copy())
    if subset.empty:empty+=1;print('EMPTY',prefix,flush=True);continue
-   subset['geometry']=subset.geometry.intersection(geom)
+   if level!='province':subset['geometry']=subset.geometry.intersection(geom)
    subset=subset[subset.geometry.notna() & ~subset.geometry.is_empty]
    subset=subset[subset.geometry.geom_type.isin(['Polygon','MultiPolygon'])]
    if subset.empty:empty+=1;continue
