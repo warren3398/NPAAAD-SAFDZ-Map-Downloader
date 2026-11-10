@@ -228,26 +228,48 @@ def request_export():
   try:
    existing=s3.get_object(Bucket=BUCKET,Key=key_name)
    state=json.loads(existing['Body'].read())
-   if state.get('status') in ('queued','processing'):
-    return jsonify(request_id=request_id,status=state['status'],message='This export is already in the queue')
+   if state.get('status')=='processing':
+    return jsonify(request_id=request_id,status='processing',message='GIS worker is processing this request'),202
+   if state.get('status')=='ready':
+    return jsonify(request_id=request_id,status='ready',message='Generation completed; refreshing exports')
+   # Existing queued requests also need an immediate dispatch attempt.
+   if state.get('status')!='queued':
+    state={'request_id':request_id,'island':island,'province':province,'layer':layer,'scope':scope,'place':place,'status':'queued','created_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+    s3.put_object(Bucket=BUCKET,Key=key_name,Body=json.dumps(state).encode(),ContentType='application/json')
   except Exception as exc:
    code=getattr(exc,'response',{}).get('Error',{}).get('Code','')
    if code not in ('404','NoSuchKey','NotFound'):raise
-  state={'request_id':request_id,'island':island,'province':province,'layer':layer,'scope':scope,'place':place,'status':'queued','created_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
-  s3.put_object(Bucket=BUCKET,Key=key_name,Body=json.dumps(state).encode(),ContentType='application/json')
-  # Dispatch the GitHub worker immediately when an Actions-scoped token is configured.
-  # Keep the scheduled worker as a safe fallback if dispatch is unavailable.
-  dispatched=False
+   state={'request_id':request_id,'island':island,'province':province,'layer':layer,'scope':scope,'place':place,'status':'queued','created_at':datetime.datetime.now(datetime.timezone.utc).isoformat()}
+   s3.put_object(Bucket=BUCKET,Key=key_name,Body=json.dumps(state).encode(),ContentType='application/json')
+  # Dispatch for new AND previously queued requests; avoid repeated dispatches.
   token=os.getenv('GITHUB_ACTIONS_TOKEN','').strip()
-  if token:
+  if not token:
+   return jsonify(request_id=request_id,status='queued',dispatched=False,message='GitHub Actions token is not visible to the running Render service. Check the Environment key and redeploy.'),202
+  last=state.get('last_dispatch_attempt_at','')
+  if last:
    try:
-    import urllib.request
-    payload=json.dumps({'ref':'main'}).encode()
-    req=urllib.request.Request('https://api.github.com/repos/warren3398/NPAAAD-SAFDZ-Map-Downloader/actions/workflows/free-on-demand-exports.yml/dispatches',data=payload,headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'npaaad-map-generator','Content-Type':'application/json'},method='POST')
-    with urllib.request.urlopen(req,timeout=12) as response:dispatched=response.status==204
-   except Exception:
-    app.logger.exception('Immediate GitHub workflow dispatch failed; scheduled queue remains active')
-  return jsonify(request_id=request_id,status='queued',dispatched=dispatched,message=('Generation workflow triggered immediately.' if dispatched else 'Queued for the scheduled GitHub Actions worker; immediate dispatch requires GITHUB_ACTIONS_TOKEN.')),202
+    elapsed=(datetime.datetime.now(datetime.timezone.utc)-datetime.datetime.fromisoformat(last)).total_seconds()
+    if elapsed<120:return jsonify(request_id=request_id,status='queued',dispatched=bool(state.get('dispatched')),message=state.get('dispatch_message','Dispatch attempted recently; waiting for worker.')),202
+   except (ValueError,TypeError):pass
+  dispatched=False
+  dispatch_message=''
+  try:
+   import urllib.request,urllib.error
+   payload=json.dumps({'ref':'main'}).encode()
+   req=urllib.request.Request('https://api.github.com/repos/warren3398/NPAAAD-SAFDZ-Map-Downloader/actions/workflows/free-on-demand-exports.yml/dispatches',data=payload,headers={'Authorization':'Bearer '+token,'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28','User-Agent':'npaaad-map-generator','Content-Type':'application/json'},method='POST')
+   with urllib.request.urlopen(req,timeout=12) as response:dispatched=response.status==204
+   dispatch_message='GitHub Actions workflow triggered. Waiting for GIS worker.' if dispatched else 'GitHub Actions did not accept the workflow dispatch.'
+  except urllib.error.HTTPError as exc:
+   dispatch_message='GitHub Actions dispatch rejected (HTTP '+str(exc.code)+'). Check token repository access and Actions: Read and write permission.'
+   app.logger.warning('GitHub dispatch rejected: HTTP %s',exc.code)
+  except Exception:
+   dispatch_message='Could not reach GitHub Actions. Scheduled processing remains available.'
+   app.logger.exception('Immediate GitHub workflow dispatch failed')
+  state['last_dispatch_attempt_at']=datetime.datetime.now(datetime.timezone.utc).isoformat()
+  state['dispatched']=dispatched
+  state['dispatch_message']=dispatch_message
+  s3.put_object(Bucket=BUCKET,Key=key_name,Body=json.dumps(state).encode(),ContentType='application/json')
+  return jsonify(request_id=request_id,status='queued',dispatched=dispatched,message=dispatch_message),202
  except Exception:
   app.logger.exception('Could not queue export')
   return jsonify(error='Unable to queue export right now'),503
