@@ -41,7 +41,7 @@ with tempfile.TemporaryDirectory() as temp:
  if a.scope=='province':
   from shapely.ops import unary_union
   tasks=[('province','',province,'',unary_union(source_frame.geometry))]
- tasks=[]
+ if a.scope!='province':tasks=[]
  for level in levels:
   name='municipalities.gpkg' if level=='municipality' else 'barangays.gpkg'
   path=root/name
