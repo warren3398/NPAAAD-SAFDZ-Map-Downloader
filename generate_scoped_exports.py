@@ -1,5 +1,6 @@
 """Resumable offline exports. One province/layer per GitHub Actions run."""
 import argparse,os,re,tempfile,zipfile
+import pyogrio
 from pathlib import Path
 import boto3,geopandas as gpd
 from botocore.config import Config
@@ -75,7 +76,8 @@ with tempfile.TemporaryDirectory() as temp:
  for level,place,mun,brgy,geom in tasks[a.offset:a.offset+a.limit]:
   prefix=(f'exports/{a.island}/{province}/{a.layer}' if level=='province' else f'exports/{a.island}/{province}/{level}/{place}/{a.layer}')
   keys={ext:f'{prefix}.{ext}' for ext in ('jpg','pdf','zip')}
-  if all(exists(key) for key in keys.values()):
+  missing={ext for ext,key in keys.items() if not exists(key)}
+  if not missing:
    skipped+=1;print('SKIP existing',prefix,flush=True);continue
   try:
    subset=(source_frame.copy() if level=='province' else source_frame.loc[source_frame.geometry.intersects(geom)].copy())
@@ -84,21 +86,26 @@ with tempfile.TemporaryDirectory() as temp:
    subset=subset[subset.geometry.notna() & ~subset.geometry.is_empty]
    subset=subset[subset.geometry.geom_type.isin(['Polygon','MultiPolygon'])]
    if subset.empty:empty+=1;continue
-   gpkg=root/'clipped.gpkg'
-   if gpkg.exists():gpkg.unlink()
-   subset.to_file(gpkg,driver='GPKG')
-   jpg=root/'map.jpg';pdf=root/'map.pdf'
-   render_map(gpkg,a.layer,f'{brgy}, {mun}, {province}' if brgy else f'{mun}, {province}',jpg,pdf)
-   shape=root/'shape'
-   shape.mkdir(exist_ok=True)
-   for file in shape.iterdir():file.unlink()
-   subset.to_file(shape/'dataset.shp',driver='ESRI Shapefile',encoding='UTF-8')
-   archive=root/'dataset.zip'
-   with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
-    for file in shape.iterdir():z.write(file,file.name)
-   # Upload each completed artifact; reruns skip fully completed locations.
-   for ext,path in [('jpg',jpg),('pdf',pdf),('zip',archive)]:
-    s3.upload_file(str(path),bucket,keys[ext],ExtraArgs={'ContentType':{'jpg':'image/jpeg','pdf':'application/pdf','zip':'application/zip'}[ext]})
+   # Prepare only missing exports; never rerender a map to rebuild ZIP.
+   if 'jpg' in missing or 'pdf' in missing:
+    gpkg=root/'clipped.gpkg'
+    if gpkg.exists():gpkg.unlink()
+    pyogrio.write_dataframe(subset,gpkg,driver='GPKG')
+    jpg=root/'map.jpg';pdf=root/'map.pdf'
+    render_map(gpkg,a.layer,f'{brgy}, {mun}, {province}' if brgy else f'{mun}, {province}',jpg,pdf)
+   if 'zip' in missing:
+    shape=root/'shape'
+    shape.mkdir(exist_ok=True)
+    for file in shape.iterdir():file.unlink()
+    pyogrio.write_dataframe(subset.reset_index(drop=True),shape/'dataset.shp',driver='ESRI Shapefile',encoding='UTF-8')
+    archive=root/'dataset.zip'
+    # Shapefile compression is typically CPU-bound; fast DEFLATE is much quicker.
+    with zipfile.ZipFile(archive,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=1,allowZip64=True) as z:
+     for file in shape.iterdir():z.write(file,file.name)
+   paths={'jpg':root/'map.jpg','pdf':root/'map.pdf','zip':root/'dataset.zip'}
+   for ext in ('jpg','pdf','zip'):
+    if ext in missing:
+     s3.upload_file(str(paths[ext]),bucket,keys[ext],ExtraArgs={'ContentType':{'jpg':'image/jpeg','pdf':'application/pdf','zip':'application/zip'}[ext]})
    completed+=1;print('UPLOADED',prefix,'features',len(subset),flush=True)
   except Exception as exc:
    print('FAILED',prefix,repr(exc),flush=True)
