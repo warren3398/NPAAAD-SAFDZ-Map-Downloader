@@ -158,7 +158,7 @@ def register(app, storage, bucket, boundary_path):
                     match = pattern.fullmatch(obj['Key'])
                     if match and obj.get('Size', 0) and match[2] != 'north':
                         items.append(dict(island=match[1], province=match[2], layer=match[3]))
-            return jsonify(items=items)
+            return jsonify(items=items), 200, {'X-Regional-Renderer': 'raster-v1'}
         except Exception:
             app.logger.exception('Source dataset listing failed')
             return jsonify(error='Source dataset list is unavailable.'), 503
