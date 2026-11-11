@@ -203,6 +203,17 @@ def register(app, storage, bucket, boundary_path):
             label = place or province or slug(region)
             name = f'{label}_{layer}.{ext}'
             target = folder / name
+            if scope == 'region' and fmt == 'jpeg':
+                from regional_jpeg import render_region
+                with LOCK:
+                    folder.mkdir(parents=True, exist_ok=True)
+                    if not target.exists():
+                        staging = folder / 'regional.part.jpg'
+                        render_region(storage, bucket, sources, layer, region, staging, ROOT / 'province_rasters')
+                        staging.replace(target)
+                response = ready(send_file(target, as_attachment=True, download_name=name))
+                response.headers['X-Regional-Renderer'] = 'raster-v1'
+                return response
             with LOCK:
                 folder.mkdir(parents=True, exist_ok=True)
                 if not target.exists():
