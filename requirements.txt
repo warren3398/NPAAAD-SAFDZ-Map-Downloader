@@ -6,3 +6,4 @@ contextily>=1.6
 gunicorn>=22
 pyogrio>=0.9
 rasterio>=1.4
+Pillow>=10.1

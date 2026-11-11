@@ -21,7 +21,7 @@ def test_streamed_clip_and_append_keep_all_features_and_numeric_attributes(tmp_p
     result=gpd.read_file(target)
     assert result.quantity.tolist()==[1,2,3]
     assert len(set(result.source_fid))==3
-    assert result.geometry.area.sum()==1
+    assert result.geometry.union_all().equals(boundary.geometry.iloc[0])
     assert result.label.isna().sum()==1
     vectors.shapefile_from_geopackage(target,tmp_path/'map.zip',tmp_path)
     shape=gpd.read_file(tmp_path/'shapefile/map.shp')

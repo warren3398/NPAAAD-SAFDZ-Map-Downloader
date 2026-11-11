@@ -48,7 +48,7 @@ def schema_for(infos):
 
 
 def build_geopackage(storage, bucket, sources, layer, boundary, target):
-    from map_layout import STYLES, find_field
+    from map_styles import STYLES, find_field
     from regional_jpeg import class_code
     palette = {code for code, _, _ in STYLES[layer]}
     target = Path(target)

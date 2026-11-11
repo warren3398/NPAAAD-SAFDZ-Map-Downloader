@@ -3,9 +3,6 @@ from pathlib import Path
 from flask import Flask,request,jsonify,send_file,render_template
 import boto3,geopandas as gpd
 from botocore.config import Config
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
 app=Flask(__name__)
 BUCKET=os.getenv('R2_BUCKET','npaaad-safdz-data')
 account=os.getenv('R2_ACCOUNT_ID')

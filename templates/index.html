@@ -33,7 +33,7 @@ select{width:100%;padding:12px;border:1px solid #b9cdc0;border-radius:9px;backgr
 <iframe id="download-frame" name="download-frame" title="Download response" hidden></iframe>
 </section></main>
 <script>
-const $=id=>document.getElementById(id),buttons=[...document.querySelectorAll('[data-fmt]')];let items=[],downloadTimer=null;
+const $=id=>document.getElementById(id),buttons=[...document.querySelectorAll('[data-fmt]')];let items=[];
 function status(message,kind=''){const el=$('status');el.textContent=message;el.className='status '+kind}
 function pretty(s){return s.split('-').map(v=>v.charAt(0).toUpperCase()+v.slice(1)).join(' ')}
 function fill(el,values,placeholder){el.replaceChildren(new Option(placeholder,''),...values.map(v=>new Option(pretty(v),v)))}
@@ -94,18 +94,31 @@ $('barangay').addEventListener('change',update);
 $('province').addEventListener('change',refreshPlaces);$('layer').addEventListener('change',update);
 fetch('/api/datasets',{cache:'no-store'}).then(async r=>{const d=await r.json();if(!r.ok||d.error)throw Error(d.error||'Inventory unavailable');return d}).then(d=>{items=d.items||[];fill($('island'),[...new Set(items.map(x=>x.island))].sort(),'Select island');update()}).catch(e=>{fill($('island'),[],'Unavailable');status('Could not load dataset list: '+e.message,'error')});
 
+async function prepareDownload(params){
+ const response=await fetch('/api/prepare-download',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(Object.fromEntries(params))});
+ const job=await response.json();
+ if(!response.ok)throw Error(job.error||'Could not prepare this download. Please retry.');
+ if(job.status==='ready')return;
+ for(let attempt=0;attempt<1200;attempt++){
+  await new Promise(resolve=>setTimeout(resolve,3000));
+  const response=await fetch('/api/download-status/'+job.job_id,{cache:'no-store'});
+  const state=await response.json();
+  if(!response.ok||state.status==='failed')throw Error(state.error||'Download preparation was interrupted. Please retry.');
+  if(state.status==='ready')return;
+ }
+ throw Error('Preparation is taking longer than expected. Please retry; completed work is cached.');
+}
 buttons.forEach(button=>button.addEventListener('click',async()=>{
- const token=crypto.randomUUID().replaceAll('-','');
- const params=new URLSearchParams({download_token:token,island:$('island').value,region:$('region').value,province:$('province').value,layer:$('layer').value,scope:level(),place:place(),format:button.dataset.fmt});
- status('Preparing '+button.dataset.fmt.toUpperCase()+' for the selected '+level()+'. The file will download automatically. Large areas may take longer.','loading');
- if(downloadTimer){clearInterval(downloadTimer);downloadTimer=null;}
- if(button.dataset.fmt==='jpeg'){
-  button.disabled=true;
-  try{
+ const params=new URLSearchParams({island:$('island').value,region:$('region').value,province:$('province').value,layer:$('layer').value,scope:level(),place:place(),format:button.dataset.fmt});
+ buttons.forEach(b=>b.disabled=true);
+ status('Preparing '+button.dataset.fmt.toUpperCase()+' for the selected '+level()+'. Your download will start automatically.','loading');
+ try{
+  await prepareDownload(params);
+  if(button.dataset.fmt==='jpeg'){
    const response=await fetch('/api/download?'+params);
    if(!response.ok){
     let message='Download interrupted. Please retry.';
-    try{const result=await response.json();message=result.error||message;}catch(error){}
+    try{message=(await response.json()).error||message;}catch(error){}
     throw Error(message);
    }
    const blob=await response.blob();
@@ -114,27 +127,16 @@ buttons.forEach(button=>button.addEventListener('click',async()=>{
    link.href=url;link.download=filename?filename[1]:'npaaad-safdz.jpg';
    document.body.appendChild(link);link.click();link.remove();
    setTimeout(()=>URL.revokeObjectURL(url),60000);
-   update();status('Your JPEG is ready. Check your browser downloads.','ready');
-  }catch(error){update();status(error.message||'Download interrupted. Please retry.','error');}
-  return;
- }
- if(downloadTimer)clearInterval(downloadTimer);
- const started=Date.now();
- downloadTimer=setInterval(()=>{
-  if(document.cookie.split('; ').some(value=>value==='npaaad_download='+token)){
-   clearInterval(downloadTimer);downloadTimer=null;
-   status('Your file is ready. Check your browser downloads.','ready');
-  }else if(Date.now()-started>900000){
-   clearInterval(downloadTimer);downloadTimer=null;
-   status('The download could not be confirmed. The connection may have been interrupted; please retry.','error');
+  }else{
+   $('download-frame').src='/api/download?'+params;
   }
- },1000);
- $('download-frame').src='/api/download?'+params;
+  update();status('Your file is ready. Check your browser downloads.','ready');
+ }catch(error){update();status(error.message||'Download interrupted. Please retry.','error');}
 }));
 $('download-frame').addEventListener('load',()=>{
  try{
   const text=$('download-frame').contentDocument.body.textContent.trim();
-  if(text){let result;try{result=JSON.parse(text);}catch(error){result={error:'Download interrupted. Please retry.'};}if(result.error){clearInterval(downloadTimer);downloadTimer=null;status(result.error,'error');}}
+  if(text){let result;try{result=JSON.parse(text);}catch(error){result={error:'Download interrupted. Please retry.'};}if(result.error)status(result.error,'error');}
  }catch(error){}
 });
 </script></body></html>

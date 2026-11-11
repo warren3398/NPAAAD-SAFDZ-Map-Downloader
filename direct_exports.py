@@ -177,3 +177,6 @@ def register(app, storage, bucket, boundary_path):
         except Exception:
             app.logger.exception('Direct export failed')
             return jsonify(error='Could not prepare this download. Please retry or select a smaller area.'), 503
+
+    from download_jobs import register as register_jobs
+    register_jobs(app,direct_download)
