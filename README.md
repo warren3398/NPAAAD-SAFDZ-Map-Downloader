@@ -1,10 +1,19 @@
-NPAAAD–SAFDZ Map Downloader
+# NPAAAD–SAFDZ Map Downloader
 
-Flask-based GIS map downloader using read-only Cloudflare R2 GeoPackage datasets.
+Select an island group and region, optionally a province, municipality, or barangay, then download JPEG, Shapefile ZIP, or GeoPackage. Leaving Province blank selects the whole region. There is no preview or separate generation step.
 
-Set R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, and optionally R2_BUCKET (default npaaad-safdz-data) in Render.
+Downloads read the original NPAAAD / SAFDZ GeoPackages in Cloudflare R2. Province GeoPackage downloads stream the original file. Smaller areas use their administrative boundary to read intersecting source features and clip them. Region exports combine the region's source provinces; incomplete regional coverage returns an explicit error rather than a partial download. Aliases and region membership are in `administrative_catalog.json`; ambiguous `north` sources are excluded.
 
-Render build: pip install -r requirements.txt
-Render start: gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 300
+JPEG uses a simple title, classification legend, and north arrow. GIS exports retain the selected geometry; JPEG simplification affects display only. Shapefile ZIP includes `.shp`, `.shx`, `.dbf`, `.prj`, `.cpg`, and a field-name mapping. Cached selections can be reused across formats. The cache is local and ephemeral, and its identity includes source object versions.
 
-Routes: /health, /api/inventory, /api/preview, /api/download. Export options: JPEG, PDF, shapefile ZIP. Current export scope: entire province dataset, not municipality clip.
+## Configuration
+
+Set `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`, and optionally `R2_BUCKET` (default `npaaad-safdz-data`). Boundary storage uses `BOUNDARY_R2_ACCOUNT_ID` (defaults to the source account), `BOUNDARY_R2_ACCESS_KEY_ID`, `BOUNDARY_R2_SECRET_ACCESS_KEY`, and `BOUNDARY_R2_BUCKET` (default `slopemap-gis-data`). Boundary keys are `boundaries/municipalities.gpkg` and `boundaries/barangays.gpkg` with `NAME_1`, `NAME_2`, and `NAME_3` for barangays.
+
+Render build: `pip install -r requirements.txt`
+
+Render start: `gunicorn app:app --bind 0.0.0.0:$PORT --workers 1 --threads 2 --timeout 300`
+
+Direct exports use the web process and serialize preparation to limit concurrent memory use. Large regional files require enough RAM, temporary disk, and request time; moving the button into a direct flow does not eliminate GIS processing. First-time downloads can take longer. Existing GitHub queue endpoints and automation remain available for compatibility but are not used by the downloader UI. There is no claim that every regional download fits a free web instance.
+
+Tests: install `pytest`, then run `pytest -q tests`.

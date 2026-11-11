@@ -72,7 +72,7 @@ def preview():
  except Exception as e:
   app.logger.exception('Preview failure')
   return jsonify(error='Preview unavailable: '+type(e).__name__),503
-@app.get('/api/download')
+@app.get('/api/stored-download')
 def download():
  fmt=request.args.get('format','')
  island=request.args.get('island','');province=request.args.get('province','');layer=request.args.get('layer','')
@@ -290,3 +290,7 @@ def request_export_status(request_id):
   if code in ('404','NoSuchKey','NotFound'):return jsonify(error='Request not found'),404
   app.logger.exception('Request status lookup failed')
   return jsonify(error='Request status unavailable'),503
+
+# Direct downloads build only the selected area and format; no queue or preview.
+from direct_exports import register as register_direct_downloads
+register_direct_downloads(app,s3,BUCKET,boundary_path)
