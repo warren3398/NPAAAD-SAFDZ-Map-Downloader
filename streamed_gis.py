@@ -9,34 +9,55 @@ import geopandas as gpd
 import pandas as pd
 import numpy as np
 import pyogrio
+import shapely
+from memory_utils import release_memory
 from boto3.s3.transfer import TransferConfig
 
 BATCH_SIZE = 128
 TRANSFER = TransferConfig(max_concurrency=2, max_io_queue=4, io_chunksize=256*1024)
 
 
-def area_batches(path, boundary=None, columns=None):
-    info = pyogrio.read_info(path)
-    if not info['crs']:
-        raise ValueError('Source data has no CRS.')
-    clip = boundary.to_crs(info['crs']) if boundary is not None else None
-    bbox = tuple(clip.total_bounds) if clip is not None else None
-    if clip is not None:
-        clip = clip.copy()
-        clip.geometry = clip.geometry.make_valid()
-    for offset in range(0, info['features'], BATCH_SIZE):
-        frame = gpd.read_file(path, columns=columns, bbox=bbox, skip_features=offset, max_features=BATCH_SIZE, fid_as_index=True)
-        if frame.empty:
-            break
-        frame = frame[frame.geometry.notna() & ~frame.geometry.is_empty].copy()
-        if clip is not None and not frame.empty:
-            invalid = ~frame.geometry.is_valid
-            if invalid.any():
-                frame.loc[invalid, frame.geometry.name] = frame.loc[invalid].geometry.make_valid()
-            frame = gpd.clip(frame, clip, keep_geom_type=True)
-        frame = frame[frame.geom_type.isin(['Polygon', 'MultiPolygon'])]
-        if not frame.empty:
-            yield frame
+class AreaBatches:
+    """Return each batch without retaining a second frame in a suspended generator."""
+    def __init__(self,path,boundary=None,columns=None):
+        self.path=path
+        self.info=pyogrio.read_info(path)
+        if not self.info['crs']:
+            raise ValueError('Source data has no CRS.')
+        self.columns=columns
+        self.batch_size=min(BATCH_SIZE,16) if boundary is not None else BATCH_SIZE
+        self.offset=0
+        self.clip=None
+        self.bbox=None
+        if boundary is not None:
+            clip=boundary.to_crs(self.info['crs'])
+            self.bbox=tuple(clip.total_bounds)
+            repaired=shapely.make_valid(clip.geometry.array,method='structure',keep_collapsed=False)
+            self.clip=shapely.union_all(repaired)
+
+    def __iter__(self):return self
+
+    def __next__(self):
+        while self.offset<self.info['features']:
+            offset=self.offset
+            self.offset+=self.batch_size
+            frame=gpd.read_file(self.path,columns=self.columns,bbox=self.bbox,skip_features=offset,max_features=self.batch_size,fid_as_index=True)
+            if frame.empty:
+                self.offset=self.info['features']
+                break
+            frame=frame[frame.geometry.notna() & ~frame.geometry.is_empty].copy()
+            if self.clip is not None and not frame.empty:
+                for index in frame.index[~frame.geometry.is_valid]:
+                    frame.at[index,frame.geometry.name]=shapely.make_valid(frame.at[index,frame.geometry.name],method='structure',keep_collapsed=False)
+                frame=gpd.clip(frame,self.clip,keep_geom_type=True)
+            frame=frame[frame.geom_type.isin(['Polygon','MultiPolygon'])]
+            if not frame.empty:
+                return frame
+        raise StopIteration
+
+
+def area_batches(path,boundary=None,columns=None):
+    return AreaBatches(path,boundary,columns)
 
 
 def schema_for(infos):
@@ -87,6 +108,7 @@ def build_geopackage(storage, bucket, sources, layer, boundary, target):
                 frame.to_file(target, driver='GPKG', layer='map', index=False, mode='a' if written else 'w', promote_to_multi=True)
                 written += len(frame)
                 del frame
+                release_memory(full=False)
     if not written:
         raise ValueError('No NPAAAD / SAFDZ features found in the selected area.')
     return written
@@ -113,6 +135,7 @@ def shapefile_from_geopackage(gpkg, target, folder):
         frame.rename(columns=renamed).to_file(shape / 'map.shp', driver='ESRI Shapefile', encoding='UTF-8', index=False, mode='a' if written else 'w')
         written += len(frame)
         del frame
+        release_memory(full=False)
     with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as archive:
         for path in shape.glob('map.*'):
             archive.write(path, path.name)

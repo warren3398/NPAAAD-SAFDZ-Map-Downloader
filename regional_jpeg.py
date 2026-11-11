@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import pyogrio
 import rasterio
+import shapely
 from boto3.s3.transfer import TransferConfig
 from pyproj import Transformer
 from rasterio.features import rasterize
@@ -87,7 +88,8 @@ def province_raster(storage, bucket, source, layer, cache, boundary=None):
         tolerance = max(native_bounds[2]-native_bounds[0], native_bounds[3]-native_bounds[1]) / PIXELS / 4
         if clip is not None:
             clip = clip.copy()
-            clip.geometry = clip.geometry.make_valid().simplify(tolerance, preserve_topology=True)
+            clip.geometry = shapely.make_valid(clip.geometry.array,method='structure',keep_collapsed=False)
+            clip.geometry = clip.geometry.simplify(tolerance,preserve_topology=True)
         canvas = np.zeros(shape, dtype='uint8')
         for offset in range(0, info['features'], BATCH_SIZE):
             frame = gpd.read_file(path, columns=[field], bbox=native_bounds if clip is not None else None, skip_features=offset, max_features=BATCH_SIZE)
@@ -100,7 +102,7 @@ def province_raster(storage, bucket, source, layer, cache, boundary=None):
             if clip is not None and not frame.empty:
                 invalid = ~frame.geometry.is_valid
                 if invalid.any():
-                    frame.loc[invalid, frame.geometry.name] = frame.loc[invalid].geometry.make_valid()
+                    frame.loc[invalid, frame.geometry.name] = shapely.make_valid(frame.loc[invalid].geometry.array,method='structure',keep_collapsed=False)
                 frame = gpd.clip(frame, clip, keep_geom_type=True)
             frame = frame.to_crs(3857)
             if frame.empty:

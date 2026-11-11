@@ -6,6 +6,7 @@ import time
 import uuid
 
 from flask import jsonify,request
+from memory_utils import release_memory
 
 
 def register(app,download):
@@ -18,6 +19,7 @@ def register(app,download):
         with lock:
             jobs[job_id].update(status='processing')
         try:
+            release_memory()
             with app.test_request_context('/api/download',query_string=params):
                 response=app.make_response(download())
                 try:
@@ -30,6 +32,7 @@ def register(app,download):
         except Exception:
             app.logger.exception('Background download preparation failed')
             result={'status':'failed','error':'Download preparation was interrupted. Please retry.'}
+        release_memory()
         with lock:
             jobs[job_id].update(result,updated=time.monotonic())
 

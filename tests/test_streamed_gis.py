@@ -55,3 +55,17 @@ def test_every_jpeg_scope_skips_merged_vector_export(tmp_path,monkeypatch):
         assert response.status_code==200,response.data
         assert response.data.startswith(b'\xff\xd8')
     assert not list((tmp_path/'cache').rglob('*.gpkg'))
+
+
+def test_invalid_polygon_is_repaired_before_exact_clipping(tmp_path):
+    from shapely.geometry import Polygon
+    store=Store(tmp_path)
+    path=tmp_path/'camiguin.gpkg';path.unlink()
+    invalid=Polygon([(0,0),(1,1),(0,1),(1,0),(0,0)])
+    gpd.GeoDataFrame({'NPAAAD':['A']},geometry=[invalid],crs=4326).to_file(path,driver='GPKG')
+    boundary=gpd.GeoDataFrame(geometry=[box(0,0,1,1)],crs=4326)
+    target=tmp_path/'repaired.gpkg'
+    assert vectors.build_geopackage(store,'data',store.objects,'npaaad',boundary,target)==1
+    frame=gpd.read_file(target)
+    assert frame.is_valid.all()
+    assert frame.geometry.iloc[0].area==.5
