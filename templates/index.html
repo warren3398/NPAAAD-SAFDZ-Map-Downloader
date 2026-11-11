@@ -94,10 +94,30 @@ $('barangay').addEventListener('change',update);
 $('province').addEventListener('change',refreshPlaces);$('layer').addEventListener('change',update);
 fetch('/api/datasets',{cache:'no-store'}).then(async r=>{const d=await r.json();if(!r.ok||d.error)throw Error(d.error||'Inventory unavailable');return d}).then(d=>{items=d.items||[];fill($('island'),[...new Set(items.map(x=>x.island))].sort(),'Select island');update()}).catch(e=>{fill($('island'),[],'Unavailable');status('Could not load dataset list: '+e.message,'error')});
 
-buttons.forEach(button=>button.addEventListener('click',()=>{
+buttons.forEach(button=>button.addEventListener('click',async()=>{
  const token=crypto.randomUUID().replaceAll('-','');
  const params=new URLSearchParams({download_token:token,island:$('island').value,region:$('region').value,province:$('province').value,layer:$('layer').value,scope:level(),place:place(),format:button.dataset.fmt});
  status('Preparing '+button.dataset.fmt.toUpperCase()+' for the selected '+level()+'. The file will download automatically. Large areas may take longer.','loading');
+ if(downloadTimer){clearInterval(downloadTimer);downloadTimer=null;}
+ if(button.dataset.fmt==='jpeg'){
+  button.disabled=true;
+  try{
+   const response=await fetch('/api/download?'+params);
+   if(!response.ok){
+    let message='Download interrupted. Please retry.';
+    try{const result=await response.json();message=result.error||message;}catch(error){}
+    throw Error(message);
+   }
+   const blob=await response.blob();
+   const filename=(response.headers.get('Content-Disposition')||'').match(/filename="?([^";]+)"?/);
+   const url=URL.createObjectURL(blob),link=document.createElement('a');
+   link.href=url;link.download=filename?filename[1]:'npaaad-safdz.jpg';
+   document.body.appendChild(link);link.click();link.remove();
+   setTimeout(()=>URL.revokeObjectURL(url),60000);
+   update();status('Your JPEG is ready. Check your browser downloads.','ready');
+  }catch(error){update();status(error.message||'Download interrupted. Please retry.','error');}
+  return;
+ }
  if(downloadTimer)clearInterval(downloadTimer);
  const started=Date.now();
  downloadTimer=setInterval(()=>{
@@ -106,7 +126,7 @@ buttons.forEach(button=>button.addEventListener('click',()=>{
    status('Your file is ready. Check your browser downloads.','ready');
   }else if(Date.now()-started>900000){
    clearInterval(downloadTimer);downloadTimer=null;
-   status('The download has not been confirmed. Please retry with a smaller area.','error');
+   status('The download could not be confirmed. The connection may have been interrupted; please retry.','error');
   }
  },1000);
  $('download-frame').src='/api/download?'+params;
@@ -114,7 +134,7 @@ buttons.forEach(button=>button.addEventListener('click',()=>{
 $('download-frame').addEventListener('load',()=>{
  try{
   const text=$('download-frame').contentDocument.body.textContent.trim();
-  if(text){const result=JSON.parse(text);if(result.error){clearInterval(downloadTimer);downloadTimer=null;status(result.error,'error');}}
+  if(text){let result;try{result=JSON.parse(text);}catch(error){result={error:'Download interrupted. Please retry.'};}if(result.error){clearInterval(downloadTimer);downloadTimer=null;status(result.error,'error');}}
  }catch(error){}
 });
 </script></body></html>

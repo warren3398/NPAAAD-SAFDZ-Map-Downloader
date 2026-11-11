@@ -4,12 +4,10 @@ import json
 import re
 import tempfile
 import threading
-import zipfile
 from contextlib import contextmanager
 from pathlib import Path
 
 import geopandas as gpd
-import pandas as pd
 import pyogrio
 from flask import jsonify, request, send_file
 
@@ -85,81 +83,6 @@ def selected_boundary(boundary_path, scope, province, place):
     return gpd.read_file(path, fids=ids)
 
 
-def read_area(path, boundary=None):
-    if boundary is None:
-        frame = gpd.read_file(path)
-    else:
-        info = pyogrio.read_info(path)
-        if not info['crs']:
-            raise ValueError('Source data has no CRS.')
-        boundary = boundary.to_crs(info['crs'])
-        frame = gpd.read_file(path, bbox=tuple(boundary.total_bounds))
-        if not frame.empty:
-            frame = frame[frame.geometry.notna() & ~frame.geometry.is_empty].copy()
-            frame.geometry = frame.geometry.make_valid()
-            frame = gpd.clip(frame, boundary, keep_geom_type=True)
-    if frame.crs is None:
-        raise ValueError('Source data has no CRS.')
-    frame = frame[frame.geometry.notna() & ~frame.geometry.is_empty].copy()
-    return frame[frame.geom_type.isin(['Polygon', 'MultiPolygon'])]
-
-
-def simple_jpeg(frame, layer, title, target):
-    import matplotlib
-    matplotlib.use('Agg')
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Patch
-    from map_layout import STYLES
-    styles = STYLES[layer]
-    fig, ax = plt.subplots(figsize=(11.7, 8.3))
-    try:
-        view = frame.to_crs(3857)
-        # Simplification affects the JPEG display only; GIS exports retain geometry.
-        extent = view.total_bounds
-        tolerance = max(extent[2] - extent[0], extent[3] - extent[1]) / 2400
-        view.geometry = view.geometry.simplify(tolerance, preserve_topology=True)
-        handles = []
-        for code, description, rgb in styles:
-            part = view[view['map_class'] == code]
-            if part.empty:
-                continue
-            color = tuple(c / 255 for c in rgb)
-            part.plot(ax=ax, color=color, edgecolor='none')
-            handles.append(Patch(facecolor=color, label=f'{code} — {description}'))
-        ax.set_title(f'{layer.upper()}\n{title}', fontsize=15, weight='bold')
-        ax.set_axis_off()
-        ax.annotate('N ↑', (.97, .95), xycoords='axes fraction', ha='right', fontsize=14)
-        if handles:
-            ax.legend(handles=handles, loc='center left', bbox_to_anchor=(1, .5), frameon=False, fontsize=8)
-        fig.text(.03, .02, 'Source: NPAAAD / SAFDZ database • CRS: EPSG:3857', fontsize=8)
-        fig.savefig(target, format='jpeg', dpi=150, bbox_inches='tight', facecolor='white')
-    finally:
-        plt.close(fig)
-
-
-def shapefile_zip(frame, target, folder):
-    shape = folder / 'shapefile'
-    shape.mkdir(exist_ok=True)
-    renamed = {}
-    used = {'geometry'}
-    for column in frame.columns:
-        if column == frame.geometry.name:
-            continue
-        base = re.sub(r'[^A-Za-z0-9_]', '_', str(column))[:10] or 'field'
-        name, index = base, 1
-        while name.lower() in used:
-            suffix = str(index)
-            name = base[:10-len(suffix)] + suffix
-            index += 1
-        renamed[column] = name
-        used.add(name.lower())
-    frame.rename(columns=renamed).to_file(shape / 'map.shp', driver='ESRI Shapefile', encoding='UTF-8', index=False)
-    with zipfile.ZipFile(target, 'w', zipfile.ZIP_DEFLATED) as archive:
-        for path in shape.glob('map.*'):
-            archive.write(path, path.name)
-        archive.writestr('fields.json', json.dumps(renamed, indent=2))
-
-
 def register(app, storage, bucket, boundary_path):
     @app.get('/api/datasets')
     def datasets():
@@ -218,65 +141,34 @@ def register(app, storage, bucket, boundary_path):
             label = place or province or slug(region)
             name = f'{label}_{layer}.{ext}'
             target = folder / name
-            if scope == 'region' and fmt == 'jpeg':
+            if fmt == 'jpeg':
                 from regional_jpeg import render_region
                 with export_slot():
                     folder.mkdir(parents=True, exist_ok=True)
                     if not target.exists():
-                        staging = folder / 'regional.part.jpg'
-                        render_region(storage, bucket, sources, layer, region, staging, ROOT / 'province_rasters')
+                        boundary = selected_boundary(boundary_path, scope, province, place) if scope in ('municipality', 'barangay') else None
+                        staging = folder / 'display.part.jpg'
+                        title = region if scope == 'region' else label.replace('--', ' / ').replace('-', ' ').title()
+                        render_region(storage, bucket, sources, layer, title, staging, ROOT / 'province_rasters', boundary=boundary)
                         staging.replace(target)
                 response = ready(send_file(target, as_attachment=True, download_name=name))
-                response.headers['X-Regional-Renderer'] = 'raster-v1'
+                response.headers['X-Export-Renderer'] = 'bounded-raster-v2'
                 return response
+            from streamed_gis import build_geopackage, shapefile_from_geopackage
             with export_slot():
                 folder.mkdir(parents=True, exist_ok=True)
-                if not target.exists():
-                    gpkg = folder / 'selected.gpkg'
-                    if not gpkg.exists():
-                        boundary = selected_boundary(boundary_path, scope, province, place) if scope in ('municipality', 'barangay') else None
-                        frames = []
-                        from map_layout import find_field, classify, STYLES
-                        for source in sources:
-                            with tempfile.TemporaryDirectory() as scratch:
-                                path = Path(scratch) / 'source.gpkg'
-                                storage.download_file(bucket, source['Key'], str(path))
-                                frame = read_area(path, boundary)
-                            if frame.empty:
-                                continue
-                            try:
-                                field = find_field(frame, layer)
-                                valid = {s[0] for s in STYLES[layer]}
-                                frame['map_class'] = frame[field].map(lambda value: classify(str(int(value)) if isinstance(value, (int, float)) and pd.notna(value) and float(value).is_integer() else value)).map(lambda x: x if x in valid else 'OTHERS')
-                            except ValueError:
-                                frame['map_class'] = None
-                                if fmt == 'jpeg':
-                                    raise
-                            frame['source_prov'] = source['Key'].split('/')[2]
-                            frames.append(frame.to_crs(4326))
-                        if not frames:
-                            return jsonify(error='No NPAAAD / SAFDZ features found in the selected area.'), 404
-                        combined = gpd.GeoDataFrame(pd.concat(frames, ignore_index=True), geometry='geometry', crs=4326)
-                        # Mixed source attributes are stored as text when their types differ.
-                        for column in combined.select_dtypes(include=['object']).columns:
-                            if column != combined.geometry.name:
-                                combined[column] = combined[column].map(lambda value: None if value is None else str(value))
-                        staging = folder / 'selected.part.gpkg'
-                        staging.unlink(missing_ok=True)
-                        combined.to_file(staging, driver='GPKG', layer='map', index=False)
-                        staging.replace(gpkg)
-                    if fmt == 'gpkg':
-                        target = gpkg
-                    else:
-                        frame = gpd.read_file(gpkg)
-                        staging = folder / ('download.part.' + ext)
-                        if fmt == 'jpeg':
-                            if 'map_class' not in frame or frame['map_class'].isna().any():
-                                raise ValueError('Classification field missing; JPEG cannot be styled correctly.')
-                            simple_jpeg(frame, layer, label.replace('--', ' / ').replace('-', ' ').title(), staging)
-                        else:
-                            shapefile_zip(frame, staging, folder)
-                        staging.replace(target)
+                gpkg = folder / 'selected.gpkg'
+                if not gpkg.exists():
+                    boundary = selected_boundary(boundary_path, scope, province, place) if scope in ('municipality', 'barangay') else None
+                    staging = folder / 'selected.part.gpkg'
+                    build_geopackage(storage, bucket, sources, layer, boundary, staging)
+                    staging.replace(gpkg)
+                if fmt == 'gpkg':
+                    target = gpkg
+                elif not target.exists():
+                    staging = folder / 'download.part.zip'
+                    shapefile_from_geopackage(gpkg, staging, folder)
+                    staging.replace(target)
             return ready(send_file(target, as_attachment=True, download_name=name))
         except ExportBusy as exc:
             return jsonify(error=str(exc)), 409, {'Retry-After': '5'}

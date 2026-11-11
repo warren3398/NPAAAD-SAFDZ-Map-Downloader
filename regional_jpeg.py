@@ -40,8 +40,11 @@ def class_code(value):
     return classify(value)
 
 
-def province_raster(storage, bucket, source, layer, cache):
+def province_raster(storage, bucket, source, layer, cache, boundary=None):
     identity = json.dumps(['raster-v1', layer, source['Key'], source.get('ETag'), str(source.get('LastModified', '')), PIXELS])
+    if boundary is not None:
+        fingerprint = hashlib.sha256(b''.join(boundary.to_crs(4326).geometry.to_wkb())).hexdigest()
+        identity += '|clip-v1|' + fingerprint
     cache.mkdir(parents=True, exist_ok=True)
     target = cache / (hashlib.sha256(identity.encode()).hexdigest() + '.npz')
     if target.exists():
@@ -77,17 +80,28 @@ def province_raster(storage, bucket, source, layer, cache):
         field = find_field(pd.DataFrame(columns=info['fields']), layer)
         if not info['features']:
             raise ValueError('Source data has no features.')
-        bounds = np.array(Transformer.from_crs(info['crs'], 3857, always_xy=True).transform_bounds(*info['total_bounds'], densify_pts=21))
+        clip = boundary.to_crs(info['crs']) if boundary is not None else None
+        native_bounds = tuple(clip.total_bounds) if clip is not None else info['total_bounds']
+        bounds = np.array(Transformer.from_crs(info['crs'], 3857, always_xy=True).transform_bounds(*native_bounds, densify_pts=21))
         shape, transform = grid(bounds)
-        native_bounds = info['total_bounds']
         tolerance = max(native_bounds[2]-native_bounds[0], native_bounds[3]-native_bounds[1]) / PIXELS / 4
+        if clip is not None:
+            clip = clip.copy()
+            clip.geometry = clip.geometry.make_valid().simplify(tolerance, preserve_topology=True)
         canvas = np.zeros(shape, dtype='uint8')
         for offset in range(0, info['features'], BATCH_SIZE):
-            frame = gpd.read_file(path, columns=[field], skip_features=offset, max_features=BATCH_SIZE)
+            frame = gpd.read_file(path, columns=[field], bbox=native_bounds if clip is not None else None, skip_features=offset, max_features=BATCH_SIZE)
+            if frame.empty:
+                break
             frame = frame[frame.geometry.notna() & ~frame.geometry.is_empty]
             frame = frame[frame.geom_type.isin(['Polygon', 'MultiPolygon'])].copy()
             # Quarter-pixel detail is sufficient for this display raster, before projection.
             frame.geometry = frame.geometry.simplify(tolerance, preserve_topology=True)
+            if clip is not None and not frame.empty:
+                invalid = ~frame.geometry.is_valid
+                if invalid.any():
+                    frame.loc[invalid, frame.geometry.name] = frame.loc[invalid].geometry.make_valid()
+                frame = gpd.clip(frame, clip, keep_geom_type=True)
             frame = frame.to_crs(3857)
             if frame.empty:
                 continue
@@ -111,14 +125,14 @@ def province_raster(storage, bucket, source, layer, cache):
     return canvas, bounds
 
 
-def render_region(storage, bucket, sources, layer, title, target, cache):
+def render_region(storage, bucket, sources, layer, title, target, cache, boundary=None):
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
     from matplotlib.colors import ListedColormap
     from matplotlib.patches import Patch
 
-    rasters = [province_raster(storage, bucket, source, layer, cache) for source in sources]
+    rasters = [province_raster(storage, bucket, source, layer, cache, boundary=boundary) for source in sources]
     bounds = (min(b[0] for _, b in rasters), min(b[1] for _, b in rasters), max(b[2] for _, b in rasters), max(b[3] for _, b in rasters))
     shape, transform = grid(bounds)
     canvas = np.zeros(shape, dtype='uint8')

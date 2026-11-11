@@ -75,3 +75,14 @@ def test_shared_raster_cache_survives_local_cache_clear(tmp_path, monkeypatch):
     second, second_bounds = regional.province_raster(store, 'data', store.objects[0], 'npaaad', cache)
     np.testing.assert_array_equal(first, second)
     np.testing.assert_array_equal(bounds, second_bounds)
+
+
+def test_scoped_raster_clips_selected_boundary_and_uses_separate_cache(tmp_path):
+    store=Store(tmp_path)
+    cache=tmp_path/'cache'
+    full,full_bounds=regional.province_raster(store,'data',store.objects[0],'npaaad',cache)
+    boundary=gpd.GeoDataFrame(geometry=[box(0,0,1,1)],crs=4326)
+    clipped,bounds=regional.province_raster(store,'data',store.objects[0],'npaaad',cache,boundary=boundary)
+    assert set(np.unique(clipped))=={1}
+    assert bounds[2]<full_bounds[2] and bounds[3]<full_bounds[3]
+    assert len(list(cache.glob('*.npz')))==2
