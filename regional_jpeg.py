@@ -4,12 +4,15 @@ import json
 import io
 import logging
 import tempfile
+import time
 from pathlib import Path
 
 import geopandas as gpd
 import numpy as np
 import pandas as pd
 import pyogrio
+import rasterio
+from boto3.s3.transfer import TransferConfig
 from pyproj import Transformer
 from rasterio.features import rasterize
 from rasterio.transform import from_bounds
@@ -18,7 +21,7 @@ from rasterio.warp import reproject, Resampling
 from map_layout import STYLES, classify, find_field
 
 PIXELS = 1600
-BATCH_SIZE = 4000
+BATCH_SIZE = 256
 
 
 def grid(bounds):
@@ -63,7 +66,11 @@ def province_raster(storage, bucket, source, layer, cache):
     palette = {code: i+1 for i, (code, _, _) in enumerate(STYLES[layer])}
     with tempfile.TemporaryDirectory() as scratch:
         path = Path(scratch) / 'source.gpkg'
-        storage.download_file(bucket, source['Key'], str(path))
+        started = time.monotonic()
+        print('REGIONAL_JPEG download', source['Key'], flush=True)
+        transfer = TransferConfig(max_concurrency=2, max_io_queue=4, io_chunksize=256*1024)
+        storage.download_file(bucket, source['Key'], str(path), Config=transfer)
+        print('REGIONAL_JPEG downloaded', source['Key'], round(time.monotonic()-started, 2), 'seconds', flush=True)
         info = pyogrio.read_info(path)
         if not info['crs']:
             raise ValueError('Source data has no CRS.')
@@ -81,7 +88,12 @@ def province_raster(storage, bucket, source, layer, cache):
                 continue
             values = frame[field].map(class_code).map(lambda code: palette.get(code, palette['OTHERS']))
             # GDAL burns only visible pixels; no merged full-detail geometry is retained.
-            rasterize(zip(frame.geometry, values), out=canvas, transform=transform)
+            with rasterio.Env(GDAL_CACHEMAX=8*1024*1024):
+                rasterize(zip(frame.geometry, values), out=canvas, transform=transform)
+            del frame, values
+            if offset % (BATCH_SIZE*40) == 0:
+                print('REGIONAL_JPEG raster', source['Key'], offset, '/', info['features'], flush=True)
+    print('REGIONAL_JPEG raster complete', source['Key'], round(time.monotonic()-started, 2), 'seconds', flush=True)
     staging = target.with_suffix('.part')
     with staging.open('wb') as stream:
         np.savez_compressed(stream, pixels=canvas, bounds=bounds)

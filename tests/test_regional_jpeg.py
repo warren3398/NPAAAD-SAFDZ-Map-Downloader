@@ -50,7 +50,7 @@ def test_cache_invalidated_by_source_version(tmp_path, monkeypatch):
     regional.province_raster(store, 'data', store.objects[0], 'npaaad', cache)
     calls = []
     download = store.download_file
-    def record(*args): calls.append(args); download(*args)
+    def record(*args, **kwargs): calls.append(args); download(*args, **kwargs)
     monkeypatch.setattr(store, 'download_file', record)
     store.objects[0]['ETag'] = 'changed'
     regional.province_raster(store, 'data', store.objects[0], 'npaaad', cache)

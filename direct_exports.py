@@ -5,6 +5,7 @@ import re
 import tempfile
 import threading
 import zipfile
+from contextlib import contextmanager
 from pathlib import Path
 
 import geopandas as gpd
@@ -15,6 +16,20 @@ from flask import jsonify, request, send_file
 CATALOG = json.loads(Path(__file__).with_name('administrative_catalog.json').read_text())
 LOCK = threading.Lock()
 ROOT = Path(tempfile.gettempdir()) / 'npaaad_direct_exports'
+
+
+class ExportBusy(Exception):
+    pass
+
+
+@contextmanager
+def export_slot():
+    if not LOCK.acquire(timeout=1):
+        raise ExportBusy('Another download is being prepared. Please wait for it to finish, then retry.')
+    try:
+        yield
+    finally:
+        LOCK.release()
 
 
 def slug(value):
@@ -205,7 +220,7 @@ def register(app, storage, bucket, boundary_path):
             target = folder / name
             if scope == 'region' and fmt == 'jpeg':
                 from regional_jpeg import render_region
-                with LOCK:
+                with export_slot():
                     folder.mkdir(parents=True, exist_ok=True)
                     if not target.exists():
                         staging = folder / 'regional.part.jpg'
@@ -214,7 +229,7 @@ def register(app, storage, bucket, boundary_path):
                 response = ready(send_file(target, as_attachment=True, download_name=name))
                 response.headers['X-Regional-Renderer'] = 'raster-v1'
                 return response
-            with LOCK:
+            with export_slot():
                 folder.mkdir(parents=True, exist_ok=True)
                 if not target.exists():
                     gpkg = folder / 'selected.gpkg'
@@ -263,6 +278,8 @@ def register(app, storage, bucket, boundary_path):
                             shapefile_zip(frame, staging, folder)
                         staging.replace(target)
             return ready(send_file(target, as_attachment=True, download_name=name))
+        except ExportBusy as exc:
+            return jsonify(error=str(exc)), 409, {'Retry-After': '5'}
         except ValueError as exc:
             return jsonify(error=str(exc)), 400
         except Exception:

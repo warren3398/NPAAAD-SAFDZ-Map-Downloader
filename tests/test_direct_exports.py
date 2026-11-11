@@ -24,7 +24,7 @@ class Store:
             self.objects.append({'Key': key, 'Size': path.stat().st_size, 'ETag': 'test-' + province})
     def get_paginator(self, name): return self
     def paginate(self, **kwargs): return [{'Contents': self.objects}]
-    def download_file(self, bucket, key, target): Path(target).write_bytes((self.root / (key.split('/')[2] + '.gpkg')).read_bytes())
+    def download_file(self, bucket, key, target, **kwargs): Path(target).write_bytes((self.root / (key.split('/')[2] + '.gpkg')).read_bytes())
     def get_object(self, **kwargs):
         payload = (self.root / (kwargs['Key'].split('/')[2] + '.gpkg')).read_bytes()
         class Body(io.BytesIO):
@@ -123,3 +123,12 @@ def test_source_dataset_listing(setup):
     client, _=setup
     response=client.get('/api/datasets')
     assert response.json=={'items':[{'island':'mindanao','province':'camiguin','layer':'npaaad'}]}
+
+
+def test_busy_export_does_not_block_the_web_thread(setup):
+    client, _ = setup
+    with exports.LOCK:
+        response = client.get('/api/download', query_string=args('municipality', 'jpeg'))
+    assert response.status_code == 409
+    assert 'Another download' in response.json['error']
+    assert response.headers['Retry-After'] == '5'
