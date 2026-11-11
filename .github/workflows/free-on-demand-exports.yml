@@ -2,7 +2,7 @@ name: Free on-demand GIS export queue
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/30 * * * *'
+    - cron: '*/5 * * * *'
 permissions:
   contents: read
 concurrency:
@@ -20,7 +20,7 @@ jobs:
           cache: pip
       - name: Install GIS dependencies
         run: pip install -r requirements.txt
-      - name: Process one queued map request
+      - name: Process queued map requests
         env:
           R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
           R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
