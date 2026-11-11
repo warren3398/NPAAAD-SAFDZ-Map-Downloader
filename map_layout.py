@@ -69,7 +69,14 @@ def render_map(gpkg,layer,province,jpeg_path,pdf_path,class_field=None,dem_path=
  gpd.GeoSeries([boundary],crs=mapframe.crs).boundary.plot(ax=ax,color="#203d32",linewidth=1.3,zorder=5)
  ax.set_aspect("equal");ax.set_xticks([]);ax.set_yticks([])
  ax.annotate("N",xy=(.96,.88),xytext=(.96,.95),xycoords="axes fraction",textcoords="axes fraction",ha="center",fontsize=17,fontweight="bold",arrowprops=dict(arrowstyle="-|>",color="#17402d"))
- for spine in ax.spines.values():spine.set_color("#17402d")
+ # Complete rectangular frame around the entire map panel, independent of GIS extent.
+ for spine in ax.spines.values():
+  spine.set_visible(True)
+  spine.set_color("#17402d")
+  spine.set_linewidth(1.8)
+ ax.add_patch(Rectangle((0,0),1,1,transform=ax.transAxes,fill=False,edgecolor="#17402d",linewidth=2.0,zorder=100,clip_on=False))
+ # Matching border around the information panel.
+ side.add_patch(Rectangle((0,0),1,1,transform=side.transAxes,fill=False,edgecolor="#17402d",linewidth=1.8,zorder=100,clip_on=False))
  def heading(y,text):
   side.add_patch(Rectangle((0,y-.043),1,.043,facecolor="#07542d",transform=side.transAxes))
   side.text(.5,y-.0215,text,ha="center",va="center",color="white",weight="bold",fontsize=12,transform=side.transAxes)
@@ -99,6 +106,8 @@ def render_map(gpkg,layer,province,jpeg_path,pdf_path,class_field=None,dem_path=
  side.text(.04,.055,"Source: NPAAAD / SAFDZ GeoPackage",fontsize=8,transform=side.transAxes)
  side.text(.04,.035,"CRS: "+str(mapframe.crs.to_epsg() or mapframe.crs.name)[:45],fontsize=8,transform=side.transAxes)
  side.text(.04,.015,"Generated: "+date.today().isoformat(),fontsize=8,transform=side.transAxes)
+ # Full rectangular border around the finished two-panel page.
+ fig.add_artist(Rectangle((.012,.018),.976,.965,transform=fig.transFigure,fill=False,edgecolor="#17402d",linewidth=1.5,zorder=200))
  fig.savefig(jpeg_path,dpi=170,facecolor="white",pil_kwargs={"quality":92})
  fig.savefig(pdf_path,facecolor="white")
  plt.close(fig)
