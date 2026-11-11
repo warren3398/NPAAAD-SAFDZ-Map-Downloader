@@ -142,6 +142,8 @@ def register(app, storage, bucket, boundary_path):
             name = f'{label}_{layer}.{ext}'
             target = folder / name
             if fmt == 'jpeg':
+                from jpeg_layout import LAYOUT_VERSION
+                target=folder/(LAYOUT_VERSION+'-'+name)
                 from regional_jpeg import render_region
                 with export_slot():
                     folder.mkdir(parents=True, exist_ok=True)

@@ -128,12 +128,8 @@ def province_raster(storage, bucket, source, layer, cache, boundary=None):
 
 
 def render_region(storage, bucket, sources, layer, title, target, cache, boundary=None):
-    # Pillow keeps the final page in a small RGB buffer; no plotting figure is allocated.
-    from PIL import Image, ImageDraw, ImageFont
-    import importlib.util
-    import textwrap
-    import gc
-    import ctypes
+    from memory_utils import release_memory
+    from jpeg_layout import compose
 
     rasters = [province_raster(storage, bucket, source, layer, cache, boundary=boundary) for source in sources]
     bounds = (min(b[0] for _, b in rasters), min(b[1] for _, b in rasters), max(b[2] for _, b in rasters), max(b[3] for _, b in rasters))
@@ -149,44 +145,6 @@ def render_region(storage, bucket, sources, layer, title, target, cache, boundar
         canvas[visible] = projected[visible]
     if not canvas.any():
         raise ValueError('No features are visible in the regional dataset.')
-    gc.collect()
-    try:
-        ctypes.CDLL(None).malloc_trim(0)
-    except (AttributeError, OSError):
-        pass
-    styles = STYLES[layer]
-    palette = np.array([(255,255,255,0)] + [tuple(rgb)+(255,) for _,_,rgb in styles], dtype='uint8')
-    map_image = Image.fromarray(palette[canvas])
-    page = Image.new('RGB', (1800,1200), 'white')
-    scale = min(1220/map_image.width, 990/map_image.height)
-    resized = map_image.resize((max(1,round(map_image.width*scale)),max(1,round(map_image.height*scale))), Image.Resampling.NEAREST)
-    page.paste(resized, (30+(1220-resized.width)//2,130+(990-resized.height)//2), resized)
-    del map_image, resized, rasters
-    draw = ImageDraw.Draw(page)
-    fonts = [Path('/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf')]
-    spec = importlib.util.find_spec('matplotlib')
-    if spec and spec.origin:
-        fonts.append(Path(spec.origin).parent/'mpl-data/fonts/ttf/DejaVuSans.ttf')
-    def font(size):
-        for path in fonts:
-            if path.exists():
-                return ImageFont.truetype(str(path), size)
-        return ImageFont.load_default(size=size)
-    draw.text((900,15), layer.upper(), font=font(38), fill='#173b2c', anchor='mt')
-    draw.text((900,65), title, font=font(27), fill='#173b2c', anchor='mt')
-    draw.text((1210,140),'N',font=font(24),fill='#173b2c',anchor='mt')
-    draw.line([(1210,215),(1210,170)],fill='#173b2c',width=3)
-    draw.polygon([(1210,164),(1202,180),(1218,180)],fill='#173b2c')
-    present = set(np.unique(canvas))
-    y=250
-    draw.text((1290,205),'Legend',font=font(25),fill='#173b2c')
-    for index,(code,description,rgb) in enumerate(styles):
-        if index+1 not in present:
-            continue
-        draw.rectangle((1290,y+4,1320,y+21),fill=tuple(rgb),outline='#b0b0b0')
-        lines=textwrap.wrap(f'{code} — {description}',width=43)
-        for line_index,line in enumerate(lines):
-            draw.text((1335,y+line_index*22),line,font=font(17),fill='#173b2c')
-        y+=max(35,len(lines)*22+10)
-    draw.text((30,1165),'Source: NPAAAD / SAFDZ database • CRS: EPSG:3857',font=font(16),fill='#465d50')
-    page.save(target,format='JPEG',quality=92)
+    del rasters,projected,visible,pixels
+    release_memory()
+    return compose(canvas,bounds,layer,title,target)
