@@ -27,7 +27,7 @@ print('PROCESSING',item,flush=True)
 env=os.environ.copy()
 env['BOUNDARY_R2_ACCESS_KEY_ID']=env.get('BOUNDARY_R2_ACCESS_KEY_ID') or env.get('R2_ACCESS_KEY_ID','')
 env['BOUNDARY_R2_SECRET_ACCESS_KEY']=env.get('BOUNDARY_R2_SECRET_ACCESS_KEY') or env.get('R2_SECRET_ACCESS_KEY','')
-cmd=[sys.executable,'generate_scoped_exports.py','--island',item['island'],'--province',item['province'],'--layer',item['layer'],'--scope',item['scope'],'--offset','0','--limit','100'] + (['--place-filter',item['place']] if item['scope']!='province' else [])]
+cmd=[sys.executable,'generate_scoped_exports.py','--island',item['island'],'--province',item['province'],'--layer',item['layer'],'--scope',item['scope'],'--offset','0','--limit','100'] + (['--place-filter',item['place']] if item['scope']!='province' else [])
 try:
  result=subprocess.run(cmd,env=env,text=True,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,timeout=3300)
  print(result.stdout,flush=True)
