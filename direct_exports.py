@@ -164,6 +164,7 @@ def register(app, storage, bucket, boundary_path):
                         staging.replace(target)
                 response = ready(send_file(target, as_attachment=True, download_name=name))
                 response.headers['X-Export-Renderer'] = 'bounded-raster-v2'
+                response.headers['X-Map-Layout'] = LAYOUT_VERSION
                 return response
             from streamed_gis import build_geopackage, shapefile_from_geopackage
             with export_slot():
