@@ -5,11 +5,12 @@ import importlib.util
 import numpy as np
 from PIL import Image,ImageDraw,ImageFont
 from pyproj import Transformer
+from layout_units import SCALE,PAGE_SIZE,px,LayoutDraw
 from satellite import background as satellite_background
 
 from map_styles import STYLES
 
-LAYOUT_VERSION='compact-satellite-v6'
+LAYOUT_VERSION='4k-satellite-v9'
 GREEN='#005b3c'
 INK='#202d27'
 LINE='#b6c0b9'
@@ -33,6 +34,7 @@ def class_areas(canvas,bounds,class_count):
 
 
 def _font(size,bold=False):
+    size=px(size)
     name='DejaVuSans-Bold.ttf' if bold else 'DejaVuSans.ttf'
     paths=[Path('/usr/share/fonts/truetype/dejavu')/name]
     spec=importlib.util.find_spec('matplotlib')
@@ -84,12 +86,12 @@ def draw_scale_bar(draw,bounds,image_width):
     draw.text((x,y+28),'Scale at map center',font=_font(15),fill=INK,anchor='lm')
 
 
-MAP_SIZE=(1949,1715)
+MAP_SIZE=(px(1949),px(1715))
 
 
 def map_view(bounds,shape):
     """Expand map bounds to fill the frame, preserving the overlay's pixel registration."""
-    scale=min((MAP_SIZE[0]-145)/shape[1],(MAP_SIZE[1]-165)/shape[0])
+    scale=min((MAP_SIZE[0]-px(145))/shape[1],(MAP_SIZE[1]-px(165))/shape[0])
     size=(max(1,round(shape[1]*scale)),max(1,round(shape[0]*scale)))
     offset=((MAP_SIZE[0]-size[0])//2,(MAP_SIZE[1]-size[1])//2)
     left,bottom,right,top=bounds
@@ -103,8 +105,8 @@ def compose(canvas,bounds,layer,title,target):
     styles=STYLES[layer]
     areas=class_areas(canvas,bounds,len(styles))
     total=float(areas.sum())
-    page=Image.new('RGB',(3000,1880),'white')
-    draw=ImageDraw.Draw(page)
+    page=Image.new('RGB',PAGE_SIZE,'white')
+    draw=LayoutDraw(page)
     draw.rectangle((34,26,2966,1852),outline='#59645d',width=3)
     draw.rectangle((70,60,2024,1780),outline=LINE,width=3)
 
@@ -117,12 +119,12 @@ def compose(canvas,bounds,layer,title,target):
     image=background.convert('RGBA')
     image.alpha_composite(overlay,dest=offset)
     del background,overlay
-    page.paste(image,(73,63),image)
+    page.paste(image,(px(73),px(63)),image)
     credit_size=18
     while draw.textlength(imagery_credit,font=_font(credit_size))>1929 and credit_size>11:credit_size-=1
     draw.text((78,1810),imagery_credit,font=_font(credit_size),fill=INK,anchor='lm')
     draw.text((78,1836),'Classification overlay: 70% opacity' if opacity==179 else 'Classification overlay: full opacity',font=_font(18),fill=INK,anchor='lm')
-    draw_scale_bar(draw,view_bounds,image.width)
+    draw_scale_bar(draw,view_bounds,image.width/SCALE)
     del image
     draw.rectangle((1852,128,1956,268),fill='white',outline='#79847d',width=3)
     draw.text((1904,167),'N',font=_font(27,True),fill=INK,anchor='mm')
@@ -170,5 +172,5 @@ def compose(canvas,bounds,layer,title,target):
     band(info_y,80,'MAP INFORMATION')
     draw.text((2108,info_y+99),'CRS: EPSG:3857 | Source: NPAAAD / SAFDZ database',font=_font(19),fill=INK,anchor='lm')
     draw.text((2108,info_y+127),f'Classified area: {total:,.2f} ha (raster estimate; equal-area)',font=_font(18),fill=INK,anchor='lm')
-    page.save(target,format='JPEG',quality=94,dpi=(180,180))
+    page.save(target,format='JPEG',quality=95,subsampling=0,dpi=(300,300))
     return {'areas_ha':areas.tolist(),'total_ha':total,'area_method':'equal-area classified raster estimate'}

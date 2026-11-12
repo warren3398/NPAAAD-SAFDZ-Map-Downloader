@@ -12,7 +12,7 @@ from PIL import Image
 HALF_WORLD=20037508.342789244
 CACHE=Path('/tmp/gis-satellite-tiles')
 CREDIT='Satellite © Esri | Sources: Esri, Vantor, Earthstar Geographics, GIS User Community'
-MAX_TILES=36
+MAX_TILES=144
 
 
 def tile_plan(bounds,size):
@@ -69,7 +69,7 @@ def background(bounds,size):
     """Return a registered RGB image and visible credit/status; never block GIS exports."""
     zoom,(x0,y0,x1,y1),extent=tile_plan(bounds,size)
     mosaic=Image.new('RGB',((x1-x0+1)*256,(y1-y0+1)*256),'#e8ece8')
-    pool=ThreadPoolExecutor(max_workers=4,thread_name_prefix='satellite')
+    pool=ThreadPoolExecutor(max_workers=6,thread_name_prefix='satellite')
     futures={pool.submit(fetch_tile,zoom,x,y):(x,y) for y in range(y0,y1+1) for x in range(x0,x1+1)}
     received=0
     try:

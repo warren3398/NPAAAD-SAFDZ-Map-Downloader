@@ -3,6 +3,7 @@ import numpy as np
 import pytest
 from PIL import Image
 import satellite,jpeg_layout
+from layout_units import px
 
 
 def test_tile_mosaic_is_registered_and_north_is_up(monkeypatch):
@@ -54,8 +55,8 @@ def test_overlay_is_translucent_and_nodata_shows_satellite(monkeypatch,tmp_path)
     jpeg_layout.compose(np.array([[1,0],[1,0]],dtype='uint8'),(0,0,1000,1000),layer,'Province: Test',target)
     with Image.open(target) as image:
         for corner in [(82,72),(2012,72),(82,1768),(2012,1768)]:
-            assert np.max(np.abs(np.array(image.getpixel(corner))-[20,40,60]))<=3
-        assert np.max(np.abs(np.array(image.getpixel((1500,700)))-[20,40,60]))<=3
+            assert np.max(np.abs(np.array(image.getpixel(tuple(px(v) for v in corner)))-[20,40,60]))<=3
+        assert np.max(np.abs(np.array(image.getpixel((px(1500),px(700))))-[20,40,60]))<=3
         rgb=jpeg_layout.STYLES[layer][0][2]
         expected=np.array(rgb)*179/255+np.array([20,40,60])*76/255
-        assert np.max(np.abs(np.array(image.getpixel((500,700)))-expected))<=4
+        assert np.max(np.abs(np.array(image.getpixel((px(500),px(700))))-expected))<=4

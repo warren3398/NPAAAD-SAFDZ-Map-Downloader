@@ -3,6 +3,8 @@ import pytest
 from PIL import Image
 from pyproj import Transformer
 from jpeg_layout import class_areas,compose
+from layout_units import px
+from PIL.JpegImagePlugin import get_sampling
 from test_direct_exports import setup
 
 
@@ -33,8 +35,10 @@ def test_reference_layout_has_map_frame_green_panels_and_area_summary(tmp_path,l
     canvas=np.array([[1,1,2,2],[1,0,2,2]],dtype='uint8')
     result=compose(canvas,(0,0,1000,500),layer,'Bokod',target)
     image=Image.open(target)
-    assert image.size==(3000,1880)
-    red,green,blue=image.getpixel((2100,160))
+    assert image.size==(3840,2406)
+    assert image.info['dpi']==(300,300)
+    assert get_sampling(image)==0
+    red,green,blue=image.getpixel((px(2100),px(160)))
     assert green>red+30
     assert result['total_ha']>0
     assert sum(result['areas_ha'])==pytest.approx(result['total_ha'])

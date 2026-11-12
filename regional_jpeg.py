@@ -21,7 +21,7 @@ from rasterio.warp import reproject, Resampling
 
 from map_styles import STYLES, classify, find_field
 
-PIXELS = 1600
+PIXELS = 2560
 BATCH_SIZE = 1024
 
 
