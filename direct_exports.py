@@ -83,6 +83,15 @@ def selected_boundary(boundary_path, scope, province, place):
     return gpd.read_file(path, fids=ids)
 
 
+def location_title(scope,region,province,boundary=None):
+    if scope=='region':return 'Region: '+region
+    if scope=='province':return 'Province: '+province.replace('-',' ').title()
+    row=boundary.iloc[0]
+    lines=['Province: '+str(row['NAME_1']),'Municipality / City: '+str(row['NAME_2'])]
+    if scope=='barangay':lines.append('Barangay: '+str(row['NAME_3']))
+    return '\n'.join(lines)
+
+
 def register(app, storage, bucket, boundary_path):
     @app.get('/api/datasets')
     def datasets():
@@ -150,7 +159,7 @@ def register(app, storage, bucket, boundary_path):
                     if not target.exists():
                         boundary = selected_boundary(boundary_path, scope, province, place) if scope in ('municipality', 'barangay') else None
                         staging = folder / 'display.part.jpg'
-                        title = region if scope == 'region' else label.replace('--', ' / ').replace('-', ' ').title()
+                        title = location_title(scope,region,province,boundary)
                         render_region(storage, bucket, sources, layer, title, staging, ROOT / 'province_rasters', boundary=boundary)
                         staging.replace(target)
                 response = ready(send_file(target, as_attachment=True, download_name=name))
