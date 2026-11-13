@@ -44,10 +44,26 @@ def test_original_province_geopackage_needs_no_preparation():
     def unexpected():raise AssertionError('Original GeoPackage must stream directly')
     register(app,unexpected)
     response=app.test_client().post('/api/prepare-download',json={**PARAMS,'scope':'province','format':'gpkg'})
-    assert response.json=={'status':'ready'}
+    assert response.json['status']=='ready' and response.json['progress']==100
 
 
 def test_lost_job_returns_clear_restart_error():
     app=Flask(__name__);register(app,lambda:None)
     response=app.test_client().get('/api/download-status/missing')
     assert response.status_code==404 and 'server restart' in response.json['error']
+
+
+def test_stage_progress_is_visible_before_completion():
+    from threading import Event
+    from job_progress import report
+    app=Flask(__name__);entered=Event();finish=Event()
+    def download():
+        report(35,'Clipping selected polygons');entered.set();finish.wait(5)
+        return 'ready'
+    register(app,download);client=app.test_client()
+    response=client.post('/api/prepare-download',json=PARAMS)
+    assert entered.wait(3)
+    state=client.get('/api/download-status/'+response.json['job_id']).json
+    assert state['status']=='processing' and state['progress']==35
+    assert state['stage']=='Clipping selected polygons' and state['progress_kind']=='stage-estimate'
+    finish.set()

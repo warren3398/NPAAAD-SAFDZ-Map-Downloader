@@ -83,3 +83,16 @@ def test_independent_city_boundary_resolves_actual_source_parent(custom):
     frame=gpd.GeoDataFrame(geometry=[mask],crs=4326)
     sources=exports.custom_sources(store,'data',lambda kind:city if kind=='province' else municipalities,frame,'npaaad')
     assert {s['Key'].split('/')[2] for s in sources}=={'camiguin','bukidnon'}
+
+
+def test_native_transfer_tracks_bytes_without_buffering(custom):
+    client,meta,_,_=custom
+    params={'boundary_id':meta['boundary_id'],'format':'gpkg','layer':'npaaad','transfer_id':'b'*32}
+    response=client.get('/api/download',query_string=params,buffered=False)
+    assert response.status_code==200
+    before=client.get('/api/transfer-progress/'+'b'*32).json
+    assert before['status']=='sending' and before['bytes_sent']==0
+    payload=b''.join(response.response)
+    after=client.get('/api/transfer-progress/'+'b'*32).json
+    assert after['status']=='complete' and after['percent']==100
+    assert after['bytes_sent']==after['total_bytes']==len(payload)

@@ -9,6 +9,7 @@ from pathlib import Path
 
 import geopandas as gpd
 import pyogrio
+from job_progress import report
 from flask import jsonify, request, send_file
 
 CATALOG = json.loads(Path(__file__).with_name('administrative_catalog.json').read_text())
@@ -122,11 +123,40 @@ def register(app, storage, bucket, boundary_path):
         from boundary_upload import save,MAX_BYTES
         upload=request.files.get('boundary')
         if upload is None:return jsonify(error='Choose a boundary file.'),400
-        try:return jsonify(save(upload.stream.read(MAX_BYTES+1),upload.filename or '')),201
+        try:return jsonify(save(upload.stream.read(MAX_BYTES+1),upload.filename or '',request.form.get('source_crs') or None)),201
         except ValueError as exc:return jsonify(error=str(exc)),400
         except Exception:
             app.logger.exception('Boundary upload failed')
             return jsonify(error='Could not read this boundary file. Check its format and CRS.'),400
+
+    @app.get('/api/transfer-progress/<token>')
+    def transfer_state(token):
+        import transfer_progress as transfers
+        if not transfers.valid(token):return jsonify(error='Invalid transfer ID.'),400
+        return jsonify(transfers.state(token)),200,{'Cache-Control':'no-store'}
+
+    @app.after_request
+    def track_transfer(response):
+        import transfer_progress as transfers
+        token=request.args.get('transfer_id','')
+        if request.path!='/api/download' or not transfers.valid(token):return response
+        transfers.start(token,response.content_length)
+        if response.status_code!=200:
+            transfers.finish(token,failed=True)
+            return response
+        upstream=response.response
+        def stream():
+            complete=False
+            try:
+                for chunk in upstream:
+                    yield chunk
+                    transfers.advance(token,len(chunk))
+                complete=True
+            finally:
+                transfers.finish(token,failed=not complete)
+                if hasattr(upstream,'close'):upstream.close()
+        response.response=stream()
+        return response
 
     @app.get('/api/datasets')
     def datasets():
@@ -169,6 +199,7 @@ def register(app, storage, bucket, boundary_path):
                 response.set_cookie('npaaad_download', token, max_age=120, samesite='Lax')
             return response
         try:
+            report(10,'Matching provincial source datasets')
             if custom:
                 from boundary_upload import load,LocalOnlyStorage
                 boundary,meta=load(custom)
@@ -178,6 +209,7 @@ def register(app, storage, bucket, boundary_path):
             else:
                 sources=source_selection(storage,bucket,island,region,province,layer)
                 selected_storage=storage
+            report(20,'Source datasets matched')
             # Province GeoPackage is already in the requested format: stream it directly.
             if scope == 'province' and fmt == 'gpkg':
                 from flask import Response, stream_with_context
@@ -205,10 +237,12 @@ def register(app, storage, bucket, boundary_path):
                     folder.mkdir(parents=True, exist_ok=True)
                     if not target.exists():
                         boundary = boundary if custom else selected_boundary(boundary_path, scope, province, place) if scope in ('municipality', 'barangay') else None
+                        report(25,'Rendering classification sources')
                         staging = folder / 'display.part.jpg'
                         title = 'Custom boundary: '+meta['name'] if custom else location_title(scope,region,province,boundary)
                         render_region(selected_storage,bucket,sources,layer,title,staging,folder/'rasters' if custom else ROOT/'province_rasters',boundary=boundary)
                         staging.replace(target)
+                report(95,'JPEG ready for transfer')
                 response = ready(send_file(target, as_attachment=True, download_name=name))
                 response.headers['X-Export-Renderer'] = 'bounded-raster-v2'
                 response.headers['X-Map-Layout'] = LAYOUT_VERSION
@@ -219,15 +253,18 @@ def register(app, storage, bucket, boundary_path):
                 gpkg = folder / 'selected.gpkg'
                 if not gpkg.exists():
                     boundary = boundary if custom else selected_boundary(boundary_path, scope, province, place) if scope in ('municipality', 'barangay') else None
+                    report(25,'Clipping GIS features to the boundary')
                     staging = folder / 'selected.part.gpkg'
                     build_geopackage(selected_storage, bucket, sources, layer, boundary, staging)
                     staging.replace(gpkg)
                 if fmt == 'gpkg':
                     target = gpkg
                 elif not target.exists():
+                    report(85,'Packaging Shapefile ZIP')
                     staging = folder / 'download.part.zip'
                     shapefile_from_geopackage(gpkg, staging, folder)
                     staging.replace(target)
+            report(95,'File ready for transfer')
             return ready(send_file(target, as_attachment=True, download_name=name))
         except ExportBusy as exc:
             return jsonify(error=str(exc)), 409, {'Retry-After': '5'}

@@ -1,4 +1,5 @@
 """Render regional JPEGs from small province rasters, without a merged GIS export."""
+from job_progress import report
 import hashlib
 import json
 import io
@@ -131,7 +132,10 @@ def render_region(storage, bucket, sources, layer, title, target, cache, boundar
     from memory_utils import release_memory
     from jpeg_layout import compose
 
-    rasters = [province_raster(storage, bucket, source, layer, cache, boundary=boundary) for source in sources]
+    rasters=[]
+    for index,source in enumerate(sources):
+        report(25+50*index/len(sources),f'Rendering source {index+1} of {len(sources)}')
+        rasters.append(province_raster(storage,bucket,source,layer,cache,boundary=boundary))
     bounds = (min(b[0] for _, b in rasters), min(b[1] for _, b in rasters), max(b[2] for _, b in rasters), max(b[3] for _, b in rasters))
     shape, transform = grid(bounds)
     canvas = np.zeros(shape, dtype='uint8')
@@ -147,4 +151,5 @@ def render_region(storage, bucket, sources, layer, title, target, cache, boundar
         raise ValueError('No features are visible in the regional dataset.')
     del rasters,projected,visible,pixels
     release_memory()
+    report(80,'Drawing map layout and background')
     return compose(canvas,bounds,layer,title,target)

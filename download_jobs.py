@@ -7,6 +7,7 @@ import uuid
 
 from flask import jsonify,request
 from memory_utils import release_memory
+from job_progress import REPORTER,report
 
 
 def register(app,download):
@@ -18,13 +19,17 @@ def register(app,download):
     def prepare(job_id,params):
         with lock:
             jobs[job_id].update(status='processing')
+        def changed(percent,stage):
+            with lock:jobs[job_id].update(progress=max(jobs[job_id].get('progress',0),percent),stage=stage)
+        context=REPORTER.set(changed)
         try:
+            report(5,'Validating selection and boundary')
             release_memory()
             with app.test_request_context('/api/download',query_string=params):
                 response=app.make_response(download())
                 try:
                     if response.status_code==200:
-                        result={'status':'ready'}
+                        result={'status':'ready','progress':100,'stage':'File ready'}
                     else:
                         result={'status':'failed','error':(response.get_json(silent=True) or {}).get('error','Could not prepare this download. Please retry.')}
                 finally:
@@ -32,6 +37,7 @@ def register(app,download):
         except Exception:
             app.logger.exception('Background download preparation failed')
             result={'status':'failed','error':'Download preparation was interrupted. Please retry.'}
+        REPORTER.reset(context)
         release_memory()
         with lock:
             jobs[job_id].update(result,updated=time.monotonic())
@@ -46,7 +52,7 @@ def register(app,download):
             return jsonify(error='Invalid download format or layer.'),400
         # This file is already stored in the requested format and streams directly.
         if not params['boundary_id'] and params['scope']=='province' and params['format']=='gpkg':
-            return jsonify(status='ready')
+            return jsonify(status='ready',progress=100,stage='Source file ready',progress_kind='stage-estimate')
         now=time.monotonic()
         with lock:
             expired=[key for key,value in jobs.items() if value['status'] not in ('queued','processing') and now-value['updated']>3600]
@@ -59,7 +65,7 @@ def register(app,download):
             if sum(value['status'] in ('queued','processing') for value in jobs.values())>=4:
                 return jsonify(error='Downloads are busy. Please retry shortly.'),429,{'Retry-After':'5'}
             job_id=uuid.uuid4().hex
-            jobs[job_id]={'status':'queued','params':params,'updated':now}
+            jobs[job_id]={'status':'queued','params':params,'updated':now,'progress':0,'stage':'Queued'}
         executor.submit(prepare,job_id,params)
         return jsonify(job_id=job_id,status='processing'),202
 
@@ -69,4 +75,4 @@ def register(app,download):
             job=jobs.get(job_id)
             if not job:
                 return jsonify(error='Download preparation was interrupted by a server restart. Please retry.'),404
-            return jsonify(status=job['status'],error=job.get('error'))
+            return jsonify(status=job['status'],error=job.get('error'),progress=job.get('progress',0),stage=job.get('stage','Queued'),progress_kind='stage-estimate')
