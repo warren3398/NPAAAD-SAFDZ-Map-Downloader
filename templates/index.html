@@ -1,37 +1,64 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>NPAAAD–SAFDZ Map Downloader</title>
+<meta name="theme-color" content="#07583b">
 <style>
-*{box-sizing:border-box}body{margin:0;background:#f3f6f4;color:#173b2c;font-family:system-ui,-apple-system,Segoe UI,Arial,sans-serif}
-header{background:#14543d;color:white;padding:24px max(20px,calc((100vw - 960px)/2))}
-h1{margin:0;font-size:clamp(22px,3vw,30px)}header p{margin:6px 0 0;color:#e0f2e8}
-main{max-width:900px;margin:28px auto;padding:0 16px}.panel{background:white;border:1px solid #e1e9e4;border-radius:15px;padding:24px;box-shadow:0 5px 18px #153b2710}
-.fields{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:15px}label{display:block;font-size:14px;font-weight:650;margin-bottom:7px}
-select{width:100%;padding:12px;border:1px solid #b9cdc0;border-radius:9px;background:white;font-size:16px;color:#173b2c}
-.status{margin:22px 0;padding:16px;border-radius:10px;background:#f0f4f2;color:#465d50}
-.status.waiting{background:#fff6e5;color:#775012;display:flex;align-items:center;gap:10px}
-.status.waiting::before{content:"";width:17px;height:17px;border:3px solid #e9d8b2;border-top-color:#b37a1e;border-radius:50%;flex-shrink:0}
-.status.loading{background:#eaf2fa;color:#194b70;display:flex;align-items:center;gap:10px}
+/* Formal theme supplied by the site owner. */
+:root{--forest:#07583b;--green:#087342;--lime:#91c94b;--ink:#14251e;--muted:#60766b;--line:#dce5e1;--bg:#f2f6f8}*{box-sizing:border-box}body{margin:0;font:16px/1.5 'Segoe UI',Arial,sans-serif;color:var(--ink);background:var(--bg)}.hero{background:linear-gradient(115deg,#004b35,#087345);color:white;padding:28px max(24px,calc((100vw - 1420px)/2));border-bottom:4px solid #92bf32}.hero h1{margin:0;font-size:clamp(26px,3vw,42px);letter-spacing:-.03em}.hero p{margin:4px 0 0;color:#e3f2e8}.hero-inner{border-left:6px solid var(--lime);padding-left:24px}.layout{max-width:1420px;margin:36px auto;padding:0 22px;display:grid;grid-template-columns:minmax(0,2.25fr) minmax(280px,1fr);gap:24px}.panel{background:#fff;border:1px solid #e4e9ed;border-radius:20px;padding:30px;box-shadow:0 12px 35px #203b4a13}.panel h2{margin:0 0 24px;font-size:27px}.panel h2:after{content:'';display:block;width:94px;height:4px;border-radius:3px;background:var(--green);margin-top:15px}.fields{display:grid;grid-template-columns:1fr 1fr;gap:22px 28px}.field label{display:block;font-weight:650;margin-bottom:8px}.field select{width:100%;height:49px;border:1px solid #bfcfc7;border-radius:9px;padding:0 14px;background:white;color:var(--ink);font:inherit}.field select:focus{outline:3px solid #a4d9b3;border-color:var(--green)}.full{grid-column:1/-1}.required{color:#bc2929}.status{margin:26px 0 18px;border-radius:10px;background:#e3f5e7;color:#145c32;padding:14px 17px}.status[hidden]{display:none}.downloads{display:grid;grid-template-columns:1fr 1fr;gap:12px}.download{display:flex;align-items:center;justify-content:center;gap:10px;text-align:center;min-height:60px;border:0;border-radius:10px;background:linear-gradient(125deg,#087c42,#005b3b);color:#fff;font:700 17px 'Segoe UI',Arial,sans-serif;cursor:pointer;text-decoration:none}.download:hover{filter:brightness(1.1)}.download.primary{grid-column:1/-1}.download small{display:block;font-weight:400;font-size:12px}.aside h3{font-size:21px;margin:0 0 10px}.aside section+section{border-top:1px solid var(--line);margin-top:24px;padding-top:24px}.aside p,.aside li{color:#3f554b}.aside ul{padding-left:20px}.aside li{margin:8px 0}.footer{height:22px;background:linear-gradient(170deg,#a4cb35 0 30%,#0d7a40 31% 70%,#00563b 71%)}@media(max-width:850px){.layout{grid-template-columns:1fr;margin:18px auto}.panel{padding:22px}}@media(max-width:580px){.fields,.downloads{grid-template-columns:1fr}.full,.download.primary{grid-column:auto}.hero{padding:25px 18px}.hero-inner{padding-left:14px}.panel h2{font-size:23px}}
+
+
+/* Integrate the supplied theme with the existing download controls. */
+body{min-height:100vh;display:flex;flex-direction:column}main{flex:1;width:100%}
+.hero p{max-width:1000px}.hero-inner{position:relative;z-index:1}.hero h1{line-height:1.15}
+.panel{min-width:0}.fields>div{min-width:0}label{display:block}select{font:inherit}select:disabled{background:#f3f6f5;color:#6c7f75;cursor:not-allowed}
+select:focus-visible,button:focus-visible{outline:3px solid #8ccba5;outline-offset:3px}
+.download{line-height:1.3}.download:disabled,.download:disabled:hover{background:#b6c8bd;color:#294839;cursor:not-allowed;filter:none}
+.download small{margin:5px 0 0;font-size:12px;line-height:1.4}.download-copy{display:block}.download-icon{flex:none;width:22px;height:22px}
+.status{font-size:14px;line-height:1.55;overflow-wrap:anywhere;background:#f0f4f2;color:#465d50}
+.status.waiting{background:#fff6e5;color:#775012}.status.loading{background:#eaf2fa;color:#194b70;display:flex;align-items:center;gap:10px}
 .status.loading::before{content:"";width:17px;height:17px;border:3px solid #b7d1e5;border-top-color:#14649a;border-radius:50%;animation:spin .75s linear infinite;flex-shrink:0}
-@keyframes spin{to{transform:rotate(360deg)}}
-.status.ready{background:#eaf6ed;color:#145c38}.status.error{background:#fff2ec;color:#8d3722}
-.actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}button{width:100%;min-width:0;border:0;border-radius:9px;background:#16764e;color:white;padding:13px 18px;font-size:15px;font-weight:650;cursor:pointer}button:disabled{background:#b6c8bd;cursor:not-allowed}
-.actions button:first-child{grid-column:1/-1;background:#16764e}.actions button{min-height:52px}.note{font-size:13px;color:#647a6d;margin:18px 0 0;line-height:1.5}
-@media(max-width:620px){.fields,.actions{grid-template-columns:1fr}.panel{padding:17px}button{width:100%}}
+.status.ready{background:#e3f5e7;color:#145c32}.status.error{background:#fff2ec;color:#8d3722}
+@keyframes spin{to{transform:rotate(360deg)}}@media(prefers-reduced-motion:reduce){.status.loading::before{animation:none}}
+.note{font-size:13px;line-height:1.6;color:#60766b;margin:20px 0 0}.aside p,.aside li{font-size:14px;line-height:1.65}.aside p{margin:0 0 10px}.aside p:last-child{margin-bottom:0}
+.aside ol{padding-left:21px;margin:0}.aside li{padding-left:3px;margin:8px 0}.aside h3{color:#075e35;font-size:21px;margin:0 0 12px}
+.aside section+section{border-top:1px solid #dce5e1;margin-top:24px;padding-top:24px}.format-name{font-weight:700;color:#174f37}.footer{flex:none;margin-top:24px}
+@media(max-width:580px){.hero-inner{border-left-width:4px}.layout{gap:18px}.download{min-height:60px}.panel{border-radius:16px}.footer{margin-top:6px}}
+
 </style></head>
-<body><header><h1>NPAAAD–SAFDZ Map Downloader</h1><p>Select an area and download NPAAAD or SAFDZ data as JPEG, Shapefile, or GeoPackage.</p></header>
-<main><section class="panel"><div class="fields">
-<div><label for="island">Island group</label><select id="island"><option value="">Loading islands…</option></select></div>
-<div><label for="region">Region</label><select id="region" disabled><option value="">Select island first</option></select></div>
-<div><label for="province">Province (optional)</label><select id="province" disabled><option value="">Select island first</option></select></div>
-<div><label for="municipality">Municipality / City (optional)</label><select id="municipality" disabled><option value="">Whole province</option></select></div>
-<div><label for="barangay">Barangay (optional)</label><select id="barangay" disabled><option value="">All barangays</option></select></div>
-<div><label for="layer">Layer</label><select id="layer"><option value="npaaad">NPAAAD</option><option value="safdz">SAFDZ</option></select></div>
-</div><div id="status" class="status" role="status" aria-live="polite">Loading available datasets…</div>
-<div class="actions"><button data-fmt="jpeg" disabled>Download JPEG</button><button data-fmt="zip" disabled>Download Shapefile ZIP</button><button data-fmt="gpkg" disabled>Download GeoPackage</button></div>
-<p class="note">Leave Province blank to download the selected region. Select a province, municipality, or barangay for a smaller area. 4K JPEG (3840 × 2406 pixels) includes satellite imagery across the full map frame beneath a 70% classification overlay, a class legend, scale bar, and area summary. GIS downloads contain the selected area. Large areas take longer to prepare.</p>
+<body data-theme="formal-v1">
+<header class="hero"><div class="hero-inner"><h1>NPAAAD–SAFDZ Map Downloader</h1><p>Select an area and download NPAAAD or SAFDZ maps and GIS data.</p></div></header>
+<main class="layout">
+<section class="panel" aria-labelledby="area-heading">
+<h2 id="area-heading">Select Map Area &amp; Layer</h2>
+<div class="fields">
+<div class="field"><label for="island">Island group <span class="required" aria-hidden="true">*</span></label><select id="island" aria-required="true"><option value="">Loading islands…</option></select></div>
+<div class="field"><label for="region">Region <span class="required" aria-hidden="true">*</span></label><select id="region" aria-required="true" disabled><option value="">Select island first</option></select></div>
+<div class="field"><label for="province">Province (optional)</label><select id="province" disabled><option value="">Select island first</option></select></div>
+<div class="field"><label for="municipality">Municipality / City (optional)</label><select id="municipality" disabled><option value="">Whole province</option></select></div>
+<div class="field"><label for="barangay">Barangay (optional)</label><select id="barangay" disabled><option value="">All barangays</option></select></div>
+<div class="field"><label for="layer">Layer <span class="required" aria-hidden="true">*</span></label><select id="layer" aria-required="true"><option value="npaaad">NPAAAD</option><option value="safdz">SAFDZ</option></select></div>
+</div>
+<div id="status" class="status" role="status" aria-live="polite">Loading available areas…</div>
+<div class="actions downloads"><button class="download primary" data-fmt="jpeg" disabled><svg class="download-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg><span class="download-copy">Download 4K JPEG<small>3840 × 2406 pixels · Map layout</small></span></button><button class="download" data-fmt="zip" disabled><svg class="download-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg><span class="download-copy">Download Shapefile ZIP<small>Vector data · .shp</small></span></button><button class="download" data-fmt="gpkg" disabled><svg class="download-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></svg><span class="download-copy">Download GeoPackage<small>Vector data · .gpkg</small></span></button></div>
+<p class="note">4K JPEG (3840 × 2406 pixels) includes satellite imagery across the full map frame beneath a 70% classification overlay, a class legend, scale bar, and area summary. GIS downloads contain the selected area. Large areas take longer to prepare.</p>
 <iframe id="download-frame" name="download-frame" title="Download response" hidden></iframe>
-</section></main>
+</section>
+<aside class="panel aside side" aria-label="Map download guide">
+<section><h3>How to Download</h3><ol>
+<li>Select an <strong>island group</strong> and <strong>region</strong>.</li>
+<li>Leave Province blank for the whole region, or choose a province, municipality, or barangay.</li>
+<li>Select the <strong>NPAAAD</strong> or <strong>SAFDZ</strong> layer.</li>
+<li>Choose a format below the area fields. Your file downloads automatically when ready.</li>
+</ol></section>
+<section><h3>Download Formats</h3>
+<p><span class="format-name">4K JPEG</span><br>A complete map layout for reports and presentations.</p>
+<p><span class="format-name">Shapefile ZIP</span><br>Selected-area vector data for GIS software.</p>
+<p><span class="format-name">GeoPackage</span><br>Selected-area GIS data in a single file.</p>
+</section>
+<section><h3>About the Map</h3><p>Choose NPAAAD or SAFDZ in the Layer field. The JPEG includes satellite imagery, a north arrow, scale bar, class legend, and area summary.</p><p>Large areas take longer to prepare. Available source coverage determines which areas can be downloaded.</p></section>
+</aside>
+</main>
+<footer class="footer" aria-hidden="true"></footer>
 <script>
 const $=id=>document.getElementById(id),buttons=[...document.querySelectorAll('[data-fmt]')];let items=[];
 function status(message,kind=''){const el=$('status');el.textContent=message;el.className='status '+kind}
