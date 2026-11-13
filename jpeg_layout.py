@@ -10,7 +10,7 @@ from satellite import background as satellite_background
 
 from map_styles import STYLES
 
-LAYOUT_VERSION='4k-satellite-v10-north'
+LAYOUT_VERSION='4k-satellite-v11-coverage'
 GREEN='#005b3c'
 INK='#202d27'
 LINE='#b6c0b9'

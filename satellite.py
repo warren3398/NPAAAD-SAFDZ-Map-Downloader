@@ -5,7 +5,9 @@ from math import floor,ceil,log2
 from pathlib import Path
 import logging
 import time
+import uuid
 from urllib.request import Request,urlopen
+from urllib.error import HTTPError
 
 from PIL import Image
 
@@ -38,21 +40,37 @@ def decode(payload):
         return image.convert('RGB')
 
 
-def fetch_tile(zoom,x,y):
+def native_tile(zoom,x,y):
     CACHE.mkdir(parents=True,exist_ok=True)
-    path=CACHE/f'{zoom}-{x}-{y}.jpg'
+    path=CACHE/f'coverage-v2-{zoom}-{x}-{y}.jpg'
     try:
         if time.time()-path.stat().st_mtime<7*86400:return decode(path.read_bytes())
     except (OSError,ValueError):pass
-    url=f'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{zoom}/{y}/{x}'
+    url=f'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{zoom}/{y}/{x}?blankTile=false'
     with urlopen(Request(url,headers={'User-Agent':'GISMapDownloader/1.0'}),timeout=5) as response:
         payload=response.read(2*1024*1024+1)
     if len(payload)>2*1024*1024:raise ValueError('Satellite tile is too large')
     image=decode(payload)
-    staging=path.with_suffix('.part')
+    staging=path.with_suffix('.'+uuid.uuid4().hex+'.part')
     try:staging.write_bytes(payload);staging.replace(path)
     finally:staging.unlink(missing_ok=True)
     return image
+
+
+def fetch_tile(zoom,x,y):
+    # Esri returns a 200 grey placeholder by default for missing high-zoom tiles.
+    # blankTile=false makes that a 404, so use the correctly registered parent.
+    for depth in range(min(zoom,4)+1):
+        factor=2**depth
+        try:tile=native_tile(zoom-depth,x//factor,y//factor)
+        except HTTPError as exc:
+            if exc.code==404 and depth<min(zoom,4):continue
+            raise
+        if not depth:return tile
+        left=(x%factor)*256/factor;top=(y%factor)*256/factor
+        result=tile.transform((256,256),Image.Transform.EXTENT,(left,top,left+256/factor,top+256/factor),resample=Image.Resampling.BILINEAR)
+        tile.close()
+        return result
 
 
 def prune_cache():
