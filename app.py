@@ -113,7 +113,7 @@ boundary_key=os.getenv('BOUNDARY_R2_ACCESS_KEY_ID')
 boundary_secret=os.getenv('BOUNDARY_R2_SECRET_ACCESS_KEY')
 boundary_account=os.getenv('BOUNDARY_R2_ACCOUNT_ID') or account
 boundary_s3=boto3.client('s3',endpoint_url=f'https://{boundary_account}.r2.cloudflarestorage.com',region_name='auto',aws_access_key_id=boundary_key,aws_secret_access_key=boundary_secret,config=Config(signature_version='s3v4')) if all((boundary_account,boundary_key,boundary_secret)) else None
-BOUNDARY_NAMES={'municipality':'municipalities.gpkg','barangay':'barangays.gpkg'}
+BOUNDARY_NAMES={'province':'provinces.gpkg','municipality':'municipalities.gpkg','barangay':'barangays.gpkg'}
 def boundary_path(level):
  if not boundary_s3:raise RuntimeError('Boundary R2 credentials are not configured')
  path=Path(tempfile.gettempdir())/('npaaad_admin_'+BOUNDARY_NAMES[level])

@@ -66,6 +66,29 @@ def source_selection(storage, bucket, island, region, province, layer):
     return [available[p] for p in sorted(available)]
 
 
+def custom_sources(storage,bucket,boundary_path,boundary,layer):
+    from boundary_upload import provinces
+    wanted={canonical(name) for _,name in provinces(boundary_path('province'),boundary)}
+    aliases={'city-of-isabela':'basilan','isabela-city':'basilan','city-of-cotabato':'maguindanao-del-sur','cotabato-city':'maguindanao-del-sur'}
+    wanted={aliases.get(name,name) for name in wanted}
+    available={}
+    pattern=re.compile(r'nationwide/(luzon|visayas|mindanao)/([a-z0-9-]{2,60})/'+layer+r'\.gpkg')
+    for page in storage.get_paginator('list_objects_v2').paginate(Bucket=bucket,Prefix='nationwide/'):
+        for obj in page.get('Contents',[]):
+            match=pattern.fullmatch(obj['Key'])
+            if not match or not obj.get('Size',0):continue
+            name=canonical(match[2])
+            if name not in available or match[2]==name:available[name]=obj
+    if wanted-available.keys():
+        # Independent cities and older province splits use their GADM source parent.
+        # Resolve those parents spatially rather than guessing from a city name.
+        parents={canonical(name) for _,name in provinces(boundary_path('municipality'),boundary)}
+        if parents:wanted=parents
+    missing=wanted-available.keys()
+    if missing:raise ValueError('Source data unavailable for uploaded boundary in: '+', '.join(sorted(missing))+'.')
+    return [available[name] for name in sorted(wanted)]
+
+
 def selected_boundary(boundary_path, scope, province, place):
     path = boundary_path(scope)
     table = pyogrio.read_dataframe(path, columns=['NAME_1', 'NAME_2'] + (['NAME_3'] if scope == 'barangay' else []), read_geometry=False, fid_as_index=True)
@@ -93,6 +116,18 @@ def location_title(scope,region,province,boundary=None):
 
 
 def register(app, storage, bucket, boundary_path):
+    if app.config.get('MAX_CONTENT_LENGTH') is None:app.config['MAX_CONTENT_LENGTH']=21*1024*1024
+    @app.post('/api/upload-boundary')
+    def upload_boundary():
+        from boundary_upload import save,MAX_BYTES
+        upload=request.files.get('boundary')
+        if upload is None:return jsonify(error='Choose a boundary file.'),400
+        try:return jsonify(save(upload.stream.read(MAX_BYTES+1),upload.filename or '')),201
+        except ValueError as exc:return jsonify(error=str(exc)),400
+        except Exception:
+            app.logger.exception('Boundary upload failed')
+            return jsonify(error='Could not read this boundary file. Check its format and CRS.'),400
+
     @app.get('/api/datasets')
     def datasets():
         if not storage:
@@ -119,9 +154,10 @@ def register(app, storage, bucket, boundary_path):
         place = request.args.get('place', '')
         layer = request.args.get('layer', '')
         fmt = request.args.get('format', '')
-        if island not in ('luzon', 'visayas', 'mindanao') or layer not in ('npaaad', 'safdz') or fmt not in ('gpkg', 'zip', 'jpeg'):
+        custom=request.args.get('boundary_id','')
+        if (not custom and island not in ('luzon', 'visayas', 'mindanao')) or layer not in ('npaaad', 'safdz') or fmt not in ('gpkg', 'zip', 'jpeg'):
             return jsonify(error='Invalid download selection.'), 400
-        if scope not in ('region', 'province', 'municipality', 'barangay') or (scope != 'region' and not re.fullmatch(r'[a-z0-9-]{2,60}', province)) or (scope in ('municipality', 'barangay') and not re.fullmatch(r'[a-z0-9-]{2,90}', place)):
+        if not custom and (scope not in ('region', 'province', 'municipality', 'barangay') or (scope != 'region' and not re.fullmatch(r'[a-z0-9-]{2,60}', province)) or (scope in ('municipality', 'barangay') and not re.fullmatch(r'[a-z0-9-]{2,90}', place))):
             return jsonify(error='Invalid administrative area.'), 400
         if scope == 'region':
             province = ''
@@ -133,7 +169,15 @@ def register(app, storage, bucket, boundary_path):
                 response.set_cookie('npaaad_download', token, max_age=120, samesite='Lax')
             return response
         try:
-            sources = source_selection(storage, bucket, island, region, province, layer)
+            if custom:
+                from boundary_upload import load,LocalOnlyStorage
+                boundary,meta=load(custom)
+                scope='custom'
+                sources=custom_sources(storage,bucket,boundary_path,boundary,layer)
+                selected_storage=LocalOnlyStorage(storage)
+            else:
+                sources=source_selection(storage,bucket,island,region,province,layer)
+                selected_storage=storage
             # Province GeoPackage is already in the requested format: stream it directly.
             if scope == 'province' and fmt == 'gpkg':
                 from flask import Response, stream_with_context
@@ -144,10 +188,13 @@ def register(app, storage, bucket, boundary_path):
                     finally:
                         obj['Body'].close()
                 return ready(Response(stream_with_context(chunks()), mimetype='application/geopackage+sqlite3', headers={'Content-Disposition': f'attachment; filename="{province}_{layer}.gpkg"', 'Content-Length': str(obj['ContentLength'])}))
-            identity = json.dumps([island, region, province, scope, place, layer, [(o['Key'], o.get('ETag'), str(o.get('LastModified', ''))) for o in sources]])
+            identity = json.dumps(([custom] if custom else [])+[island,region,province,scope,place,layer,[(o['Key'],o.get('ETag'),str(o.get('LastModified',''))) for o in sources]])
             folder = ROOT / hashlib.sha256(identity.encode()).hexdigest()
+            if custom:
+                from boundary_upload import ROOT as UPLOAD_ROOT
+                folder=UPLOAD_ROOT/custom/'exports'/folder.name
             ext = {'jpeg': 'jpg', 'gpkg': 'gpkg', 'zip': 'zip'}[fmt]
-            label = place or province or slug(region)
+            label = (slug(meta['name']) or 'custom-boundary') if custom else place or province or slug(region)
             name = f'{label}_{layer}.{ext}'
             target = folder / name
             if fmt == 'jpeg':
@@ -157,10 +204,10 @@ def register(app, storage, bucket, boundary_path):
                 with export_slot():
                     folder.mkdir(parents=True, exist_ok=True)
                     if not target.exists():
-                        boundary = selected_boundary(boundary_path, scope, province, place) if scope in ('municipality', 'barangay') else None
+                        boundary = boundary if custom else selected_boundary(boundary_path, scope, province, place) if scope in ('municipality', 'barangay') else None
                         staging = folder / 'display.part.jpg'
-                        title = location_title(scope,region,province,boundary)
-                        render_region(storage, bucket, sources, layer, title, staging, ROOT / 'province_rasters', boundary=boundary)
+                        title = 'Custom boundary: '+meta['name'] if custom else location_title(scope,region,province,boundary)
+                        render_region(selected_storage,bucket,sources,layer,title,staging,folder/'rasters' if custom else ROOT/'province_rasters',boundary=boundary)
                         staging.replace(target)
                 response = ready(send_file(target, as_attachment=True, download_name=name))
                 response.headers['X-Export-Renderer'] = 'bounded-raster-v2'
@@ -171,9 +218,9 @@ def register(app, storage, bucket, boundary_path):
                 folder.mkdir(parents=True, exist_ok=True)
                 gpkg = folder / 'selected.gpkg'
                 if not gpkg.exists():
-                    boundary = selected_boundary(boundary_path, scope, province, place) if scope in ('municipality', 'barangay') else None
+                    boundary = boundary if custom else selected_boundary(boundary_path, scope, province, place) if scope in ('municipality', 'barangay') else None
                     staging = folder / 'selected.part.gpkg'
-                    build_geopackage(storage, bucket, sources, layer, boundary, staging)
+                    build_geopackage(selected_storage, bucket, sources, layer, boundary, staging)
                     staging.replace(gpkg)
                 if fmt == 'gpkg':
                     target = gpkg

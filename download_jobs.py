@@ -13,7 +13,7 @@ def register(app,download):
     executor=ThreadPoolExecutor(max_workers=1,thread_name_prefix='gis-download')
     jobs={}
     lock=threading.Lock()
-    allowed={'island','region','province','scope','place','layer','format'}
+    allowed={'island','region','province','scope','place','layer','format','boundary_id'}
 
     def prepare(job_id,params):
         with lock:
@@ -45,7 +45,7 @@ def register(app,download):
         if params['format'] not in ('gpkg','zip','jpeg') or params['layer'] not in ('npaaad','safdz'):
             return jsonify(error='Invalid download format or layer.'),400
         # This file is already stored in the requested format and streams directly.
-        if params['scope']=='province' and params['format']=='gpkg':
+        if not params['boundary_id'] and params['scope']=='province' and params['format']=='gpkg':
             return jsonify(status='ready')
         now=time.monotonic()
         with lock:
