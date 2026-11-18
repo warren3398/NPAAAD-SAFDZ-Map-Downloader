@@ -82,14 +82,14 @@ body::before { content: none; }
 .portal-link { display: inline-block; color: var(--accent); text-decoration: none; font-size: 15px; font-weight: 730; }
 .portal-link:hover { text-decoration: underline; }
 .portal-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
-/* The illustration reaches the banner edges and fades into the title area. */
-.hero-figure { position: absolute; inset: 0 0 0 32%; margin: 0; z-index: 0; pointer-events: none; }
-.hero-figure img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center 47%; }
-.hero-figure::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, var(--banner), #0a332dd9 19%, #0a332d26 66%, transparent); }
-[data-theme="zoning-workspace"] .hero-figure { left: 38%; background: #042c1d; }
-[data-theme="zoning-workspace"] .hero-figure img { width: min(100%, 360px); margin-left: auto; object-fit: contain; object-position: right center; transform: scale(1.12); transform-origin: right center; mask-image: linear-gradient(90deg, transparent, #000 22%); }
-[data-theme="zoning-workspace"] .hero-figure::after { background: linear-gradient(90deg, var(--banner), #0a303480 37%, transparent 70%); }
-.hero-figure figcaption { position: absolute; z-index: 1; right: 20px; bottom: 12px; padding: 3px 7px; border-radius: 4px; color: #edf6ef; background: #082d25bd; font-size: 12px; }
+/* Full-bleed aerial landscape with a dark edge behind the title. */
+.hero-figure { position: absolute; inset: 0; margin: 0; z-index: 0; pointer-events: none; }
+.hero-figure img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: center 57%; }
+.hero-figure::after {
+  content: ""; position: absolute; inset: 0;
+  background: linear-gradient(90deg, #072d27 0%, #072d27ed 24%, #072d27b3 45%, #072d271a 80%),
+              linear-gradient(0deg, #072d2755, transparent 60%);
+}
 .layout { width: min(100% - 48px, 1260px); padding: 0; margin: 22px auto 28px; gap: 18px; grid-template-columns: minmax(0, 2.25fr) minmax(265px, 1fr); }
 .layout .panel { padding: clamp(17px, 2.5vw, 29px); border: 1px solid #cfdfd6; border-radius: 16px; box-shadow: 0 5px 18px #103a2610; }
 .tool-workspace .section-heading { padding-bottom: 10px; margin-bottom: 9px; border-color: #deebe3; }
@@ -128,11 +128,10 @@ body::before { content: none; }
 @media (max-width: 600px) {
   .tool-hero { align-items: flex-start; padding: 22px 16px 105px; }
   .tool-hero .hero-inner { max-width: 100%; }
-  .hero-figure, [data-theme="zoning-workspace"] .hero-figure { inset: 48px 0 0; }
-  .hero-figure::after, [data-theme="zoning-workspace"] .hero-figure::after {
-    background: linear-gradient(180deg, var(--banner), color-mix(in srgb, var(--banner) 92%, transparent) 48%, transparent 100%);
+  .hero-figure img { object-position: 67% center; }
+  .hero-figure::after {
+    background: linear-gradient(180deg, #072d27f7 8%, #072d27d9 39%, #072d2766 69%, transparent);
   }
-  .hero-figure figcaption { right: 10px; bottom: 7px; font-size: 11px; }
   .layout, .tool-footer { width: calc(100% - 24px); }
   .layout { margin-top: 14px; gap: 13px; }
   .tool-workspace .fields { grid-template-columns: minmax(0, 1fr); }
@@ -148,8 +147,7 @@ body::before { content: none; }
     <p>Find agricultural land and development zone maps. Choose an area and download a map or GIS dataset.</p>
   </div>
   <figure class="hero-figure">
-    <img src="/static/assets/zoning-layers.webp" width="512" height="512" alt="">
-    <figcaption>Agricultural GIS layers illustration</figcaption>
+    <img src="/static/assets/agricultural-landscape.webp" width="2100" height="700" alt="">
   </figure>
 </header>
 <main class="layout">
